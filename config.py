@@ -31,6 +31,11 @@ class Config:
     MAIL_USERNAME = os.environ.get('MAIL_USERNAME', 'scsmaubma@gmail.com')
     MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', '')
     MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@scsmaubmar.org')
+    ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
+    ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '32015@1')
+    SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+
+
     
     # Application
     APPLICATION_NAME = "SCMS SARL - Candidatures"
