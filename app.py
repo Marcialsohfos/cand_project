@@ -1,648 +1,1121 @@
-import os
-import json
-import zipfile
-from datetime import datetime
-from io import BytesIO
-from functools import wraps
-from flask import Flask, render_template, request, jsonify, send_file, url_for, flash, redirect, session, abort
-from flask_sqlalchemy import SQLAlchemy
-from flask_mail import Mail, Message
-from flask_cors import CORS
-from flask_migrate import Migrate
-from werkzeug.utils import secure_filename
-from werkzeug.security import generate_password_hash, check_password_hash
-from config import config
-import logging
-from pathlib import Path
-
-# Configuration du logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Initialisation des extensions
-db = SQLAlchemy()
-mail = Mail()
-migrate = Migrate()
-
-# Modèle Candidature
-class Candidature(db.Model):
-    __tablename__ = 'candidatures'
-    
-    id = db.Column(db.Integer, primary_key=True)
-    # Informations personnelles
-    nom_complet = db.Column(db.String(200), nullable=False)
-    email = db.Column(db.String(120), nullable=False)
-    telephone = db.Column(db.String(20))
-    ville = db.Column(db.String(100))
-    portfolio_lien = db.Column(db.String(500))
-    
-    # Documents (chemins de fichiers)
-    cv_path = db.Column(db.String(500))
-    lettre_motivation_path = db.Column(db.String(500))
-    lettre_motivation_text = db.Column(db.Text)
-    portfolio_fichier_path = db.Column(db.String(500))
-    
-    # Informations supplémentaires
-    competences_marketing = db.Column(db.Text)
-    
-    # Métadonnées
-    date_soumission = db.Column(db.DateTime, default=datetime.utcnow)
-    statut = db.Column(db.String(50), default='Nouvelle')  # Nouvelle, En revue, Contacté, Rejeté
-    notes_admin = db.Column(db.Text)
-    
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'nom_complet': self.nom_complet,
-            'email': self.email,
-            'telephone': self.telephone,
-            'ville': self.ville,
-            'date_soumission': self.date_soumission.isoformat() if self.date_soumission else None,
-            'statut': self.statut,
-            'has_cv': bool(self.cv_path),
-            'has_lettre': bool(self.lettre_motivation_path),
-            'has_portfolio': bool(self.portfolio_fichier_path)
-        }
-
-
-# Décorateur pour protéger les routes admin
-def admin_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not session.get('admin_logged_in'):
-            return redirect(url_for('admin_login'))
-        return f(*args, **kwargs)
-    return decorated_function
-
-
-def create_app(config_name='default'):
-    """Factory pour créer l'application Flask"""
-    app = Flask(__name__)
-    
-    # Charger la configuration
-    app.config.from_object(config[config_name])
-    config[config_name].init_app(app)
-    
-    # Initialiser les extensions
-    db.init_app(app)
-    mail.init_app(app)
-    migrate.init_app(app, db)
-    CORS(app)
-    
-    # Créer les tables si elles n'existent pas
-    with app.app_context():
-        db.create_all()
-    
-    # Helper functions
-    def allowed_file(filename):
-        """Vérifier si l'extension du fichier est autorisée"""
-        if not filename:
-            return False
-        return '.' in filename and \
-               filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
-    
-    def save_file(file, nom_candidat, type_document):
-        """Sauvegarder un fichier uploadé"""
-        if file and file.filename and allowed_file(file.filename):
-            try:
-                # Sécuriser le nom du fichier
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                original_name = secure_filename(file.filename)
-                extension = original_name.rsplit('.', 1)[-1].lower() if '.' in original_name else ''
-                
-                # Nom du fichier
-                nom_simplifie = ''.join(c for c in nom_candidat if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
-                if not nom_simplifie:
-                    nom_simplifie = 'candidat'
-                
-                new_filename = f"{timestamp}_{nom_simplifie}_{type_document}.{extension}"
-                
-                # Créer le dossier si inexistant
-                os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-                
-                # Chemin complet
-                filepath = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
-                
-                # Sauvegarder
-                file.save(filepath)
-                
-                logger.info(f"Fichier sauvegardé: {new_filename} ({os.path.getsize(filepath)} bytes)")
-                return new_filename
-            except Exception as e:
-                logger.error(f"Erreur lors de la sauvegarde du fichier: {str(e)}")
-                return None
-        
-        return None
-    
-    # Routes d'authentification admin
-    @app.route('/admin/login', methods=['GET', 'POST'])
-    def admin_login():
-        """Page de connexion admin"""
-        if request.method == 'POST':
-            username = request.form.get('username')
-            password = request.form.get('password')
-            
-            # Vérifier les identifiants
-            if username == app.config['ADMIN_USERNAME']:
-                # Si ADMIN_PASSWORD_HASH est configuré, vérifier le hash
-                if app.config.get('ADMIN_PASSWORD_HASH'):
-                    if check_password_hash(app.config['ADMIN_PASSWORD_HASH'], password):
-                        session['admin_logged_in'] = True
-                        session.permanent = True
-                        flash('Connexion réussie!', 'success')
-                        return redirect(url_for('admin_dashboard'))
-                # Sinon, vérifier le mot de passe en clair (pour développement)
-                elif password == app.config.get('ADMIN_PASSWORD', ''):
-                    session['admin_logged_in'] = True
-                    session.permanent = True
-                    flash('Connexion réussie!', 'success')
-                    return redirect(url_for('admin_dashboard'))
-            
-            flash('Identifiants incorrects', 'error')
-        
-        return render_template('admin_login.html')
-    
-    @app.route('/admin/logout')
-    def admin_logout():
-        """Déconnexion admin"""
-        session.pop('admin_logged_in', None)
-        flash('Vous avez été déconnecté', 'info')
-        return redirect(url_for('home'))
-    
-    # Routes admin protégées
-    @app.route('/admin')
-    @admin_required
-    def admin_dashboard():
-        """Tableau de bord admin"""
-        stats = {
-            'total': Candidature.query.count(),
-            'nouvelles': Candidature.query.filter_by(statut='Nouvelle').count(),
-            'en_revue': Candidature.query.filter_by(statut='En revue').count(),
-            'contactees': Candidature.query.filter_by(statut='Contacté').count()
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Postuler - SCSM SARL</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
+    <!-- Bootstrap CSS pour les spinners -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <meta name="description" content="Formulaire de candidature en ligne pour SCSM SARL - Date limite: 31 décembre 2025">
+    <style>
+        /* Styles supplémentaires pour l'upload */
+        .file-name-display {
+            font-size: 0.9em;
+            padding: 8px 12px;
+            background-color: #d4edda;
+            border-radius: 4px;
+            border-left: 4px solid #28a745;
+            margin-top: 5px;
+            color: #155724;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
-        # Dernières candidatures
-        recent_candidatures = Candidature.query.order_by(
-            Candidature.date_soumission.desc()
-        ).limit(10).all()
-        
-        return render_template('admin/dashboard.html', 
-                             stats=stats, 
-                             candidatures=recent_candidatures)
-    
-    @app.route('/admin/candidatures')
-    @admin_required
-    def liste_candidatures():
-        """Liste de toutes les candidatures"""
-        page = request.args.get('page', 1, type=int)
-        per_page = 20
-        
-        # Filtres
-        statut = request.args.get('statut')
-        search = request.args.get('search')
-        
-        query = Candidature.query
-        
-        if statut and statut != 'all':
-            query = query.filter_by(statut=statut)
-        
-        if search:
-            query = query.filter(
-                db.or_(
-                    Candidature.nom_complet.ilike(f'%{search}%'),
-                    Candidature.email.ilike(f'%{search}%'),
-                    Candidature.ville.ilike(f'%{search}%')
-                )
-            )
-        
-        candidatures = query.order_by(
-            Candidature.date_soumission.desc()
-        ).paginate(page=page, per_page=per_page, error_out=False)
-        
-        return render_template('admin/candidatures.html', 
-                             candidatures=candidatures,
-                             current_statut=statut,
-                             search=search)
-    
-    @app.route('/admin/candidature/<int:id>', methods=['GET', 'POST'])
-    @admin_required
-    def voir_candidature(id):
-        """Voir et modifier une candidature"""
-        candidature = Candidature.query.get_or_404(id)
-        
-        if request.method == 'POST':
-            # Mettre à jour le statut et les notes
-            candidature.statut = request.form.get('statut', candidature.statut)
-            candidature.notes_admin = request.form.get('notes_admin', candidature.notes_admin)
-            
-            db.session.commit()
-            flash('Candidature mise à jour avec succès!', 'success')
-            return redirect(url_for('voir_candidature', id=id))
-        
-        return render_template('admin/candidature_detail.html', 
-                             candidature=candidature)
-    
-    @app.route('/admin/download/<int:id>/<string:document>')
-    @admin_required
-    def download_document(id, document):
-        """Télécharger un document spécifique"""
-        candidature = Candidature.query.get_or_404(id)
-        
-        file_info = {
-            'cv': (candidature.cv_path, f"CV_{candidature.nom_complet}_{id}"),
-            'lettre_motivation': (candidature.lettre_motivation_path, f"Lettre_{candidature.nom_complet}_{id}"),
-            'portfolio': (candidature.portfolio_fichier_path, f"Portfolio_{candidature.nom_complet}_{id}")
+        .file-name-display i {
+            color: #28a745;
         }
         
-        if document in file_info:
-            file_path, base_name = file_info[document]
-            if file_path:
-                full_path = os.path.join(app.config['UPLOAD_FOLDER'], file_path)
-                if os.path.exists(full_path):
-                    extension = file_path.split('.')[-1] if '.' in file_path else ''
-                    download_name = f"{base_name}.{extension}" if extension else base_name
-                    return send_file(
-                        full_path,
-                        as_attachment=True,
-                        download_name=download_name
-                    )
+        .upload-success {
+            border-color: #28a745;
+            background-color: #d4edda;
+        }
         
-        flash('Document non trouvé', 'error')
-        return redirect(url_for('voir_candidature', id=id))
+        .upload-error {
+            border-color: #dc3545;
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        
+        .upload-warning {
+            border-color: #ffc107;
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        
+        .spinner-border {
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        
+        /* Navigation */
+        .admin-nav {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+        }
+        
+        .admin-nav a {
+            background: #343a40;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            text-decoration: none;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .admin-nav a:hover {
+            background: #495057;
+        }
+        
+        /* Drag and drop styles */
+        .upload-zone {
+            position: relative;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 40px 20px;
+            text-align: center;
+            transition: all 0.3s;
+            cursor: pointer;
+            background-color: #f8f9fa;
+        }
+        
+        .upload-zone:hover {
+            border-color: #007bff;
+            background-color: #e9ecef;
+        }
+        
+        .upload-zone.dragover {
+            border-color: #28a745;
+            background-color: #d4edda;
+        }
+        
+        .upload-zone input[type="file"] {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+        
+        .upload-content i {
+            font-size: 48px;
+            color: #6c757d;
+            margin-bottom: 10px;
+        }
+        
+        .upload-content p {
+            color: #6c757d;
+            margin: 0;
+        }
+        
+        .upload-content span {
+            color: #007bff;
+            font-weight: 600;
+        }
+        
+        /* Tabs for portfolio */
+        .option-tabs {
+            display: flex;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .tab-btn {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-weight: 500;
+            color: #6c757d;
+        }
+        
+        .tab-btn.active {
+            color: #007bff;
+            border-bottom-color: #007bff;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        /* Progress bar */
+        .progress-bar-container {
+            height: 6px;
+            background-color: #e9ecef;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background-color: #007bff;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation admin -->
+    <div class="admin-nav">
+        <a href="{{ url_for('home') }}">
+            <i class="fas fa-home"></i> Accueil
+        </a>
+    </div>
     
-    @app.route('/admin/download-all/<int:id>')
-    @admin_required
-    def download_all_documents(id):
-        """Télécharger tous les documents d'une candidature en ZIP"""
-        candidature = Candidature.query.get_or_404(id)
+    <div class="container">
+        <!-- En-tête avec logo -->
+        <header class="header">
+            <div class="logo-container">
+                <h1><i class="fas fa-briefcase"></i> SCSM SARL</h1>
+                <p class="tagline">Excellence, Innovation & Impact</p>
+            </div>
+            
+            <div class="deadline-container">
+                <div class="deadline-card">
+                    <i class="fas fa-calendar-alt"></i>
+                    <div>
+                        <strong>Date limite</strong>
+                        <p>{{ date_limite.strftime('%d/%m/%Y') }}</p>
+                    </div>
+                </div>
+                <div class="counter-card" id="counter">
+                    <i class="fas fa-clock"></i>
+                    <div>
+                        <strong>Temps restant</strong>
+                        <p id="countdown">Chargement...</p>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Bannière d'information -->
+        <div class="info-banner">
+            <i class="fas fa-info-circle"></i>
+            <p>Lien de candidature : <strong id="current-url"></strong></p>
+            <button class="btn-copy" onclick="copyLink()">
+                <i class="fas fa-copy"></i> Copier le lien
+            </button>
+        </div>
+
+        <!-- Contenu principal -->
+        <main class="main-grid">
+            <!-- Formulaire -->
+            <div class="form-section">
+                <div class="form-header">
+                    <h2><i class="fas fa-file-signature"></i> Formulaire de Candidature</h2>
+                    <p class="form-subtitle">Remplissez soigneusement tous les champs obligatoires (*)</p>
+                    {% if not accepte_candidatures %}
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle"></i> 
+                        La période de candidature est terminée. Vous pouvez toujours remplir le formulaire pour tester.
+                    </div>
+                    {% endif %}
+                </div>
+
+                <form id="candidatureForm" enctype="multipart/form-data">
+                    <!-- Section 1: Informations personnelles -->
+                    <fieldset class="form-fieldset">
+                        <legend><i class="fas fa-user-circle"></i> Informations Personnelles</legend>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="nom_complet">
+                                    <i class="fas fa-user"></i> Nom complet *
+                                </label>
+                                <input type="text" id="nom_complet" name="nom_complet" 
+                                       placeholder="Votre nom et prénom" required>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="email">
+                                    <i class="fas fa-envelope"></i> Adresse email *
+                                </label>
+                                <input type="email" id="email" name="email" 
+                                       placeholder="exemple@email.com" required>
+                                <div class="validation-message" id="email-validation"></div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="telephone">
+                                    <i class="fas fa-phone"></i> Téléphone
+                                </label>
+                                <input type="tel" id="telephone" name="telephone" 
+                                       placeholder="+237 XXX XXX XXX">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="ville">
+                                    <i class="fas fa-map-marker-alt"></i> Ville de résidence *
+                                </label>
+                                <select id="ville" name="ville" required>
+                                    <option value="">Sélectionnez votre ville</option>
+                                    <option value="Bertoua">Bertoua</option>
+                                    <option value="Yaoundé">Yaoundé</option>
+                                    <option value="Bafoussam">Bafoussam</option>
+                                    <option value="Douala">Douala</option>
+                                    <option value="Autre">Autre ville</option>
+                                </select>
+                                <p class="form-note">Possibilité de négociation pour les candidatures hors Bertoua</p>
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <!-- Section 2: Documents -->
+                    <fieldset class="form-fieldset">
+                        <legend><i class="fas fa-paperclip"></i> Documents Requis</legend>
+                        
+                        <!-- CV -->
+                        <div class="document-upload">
+                            <div class="document-header">
+                                <i class="fas fa-file-contract"></i>
+                                <div>
+                                    <h4>Curriculum Vitae (CV) *</h4>
+                                    <p>Format: PDF, DOC, DOCX (max 20MB)</p>
+                                </div>
+                            </div>
+                            <div class="upload-zone" id="cv-zone">
+                                <input type="file" id="cv" name="cv" accept=".pdf,.doc,.docx" required>
+                                <div class="upload-content">
+                                    <i class="fas fa-cloud-upload-alt"></i>
+                                    <p>Glissez-déposez votre CV ou <span>parcourir</span></p>
+                                </div>
+                            </div>
+                            <div class="file-status" id="cv-status"></div>
+                        </div>
+
+                        <!-- Portfolio -->
+                        <div class="document-upload">
+                            <div class="document-header">
+                                <i class="fas fa-briefcase"></i>
+                                <div>
+                                    <h4>Portfolio</h4>
+                                    <p>Lien en ligne ou fichier (PDF, images, max 20MB)</p>
+                                </div>
+                            </div>
+                            
+                            <div class="portfolio-options">
+                                <div class="option-tabs">
+                                    <button type="button" class="tab-btn active" data-tab="lien">Lien en ligne</button>
+                                    <button type="button" class="tab-btn" data-tab="fichier">Fichier</button>
+                                </div>
+                                
+                                <div class="tab-content active" id="lien-tab">
+                                    <input type="url" id="portfolio_lien" name="portfolio_lien" 
+                                           placeholder="https://votre-portfolio.com">
+                                </div>
+                                
+                                <div class="tab-content" id="fichier-tab">
+                                    <div class="upload-zone" id="portfolio-zone">
+                                        <input type="file" id="portfolio_fichier" name="portfolio_fichier" 
+                                               accept=".pdf,.jpg,.jpeg,.png,.gif">
+                                        <div class="upload-content">
+                                            <i class="fas fa-cloud-upload-alt"></i>
+                                            <p>Glissez-déposez votre portfolio ou <span>parcourir</span></p>
+                                        </div>
+                                    </div>
+                                    <div class="file-status" id="portfolio-status"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Lettre de motivation -->
+                        <div class="document-upload">
+                            <div class="document-header">
+                                <i class="fas fa-envelope-open-text"></i>
+                                <div>
+                                    <h4>Lettre de motivation *</h4>
+                                    <p>Format: PDF, DOC, DOCX, TXT (max 20MB)</p>
+                                </div>
+                            </div>
+                            <div class="upload-zone" id="lettre-zone">
+                                <input type="file" id="lettre_motivation" name="lettre_motivation" 
+                                       accept=".pdf,.doc,.docx,.txt" required>
+                                <div class="upload-content">
+                                    <i class="fas fa-cloud-upload-alt"></i>
+                                    <p>Glissez-déposez votre lettre ou <span>parcourir</span></p>
+                                </div>
+                            </div>
+                            <div class="file-status" id="lettre-status"></div>
+                        </div>
+                    </fieldset>
+
+                    <!-- Section 3: Contenu -->
+                    <fieldset class="form-fieldset">
+                        <legend><i class="fas fa-edit"></i> Contenu de la Candidature</legend>
+                        
+                        <div class="form-group">
+                            <label for="motivation">
+                                <i class="fas fa-comment-dots"></i> Lettre de motivation (texte) *
+                                <span class="sub-label">Expliquez votre intérêt pour SCSM SARL et ses thématiques</span>
+                            </label>
+                            <textarea id="motivation" name="motivation" rows="8" required 
+                                      placeholder="Cher(e) Responsable des Ressources Humaines,
+
+Je souhaite exprimer mon vif intérêt pour le poste chez SCSM SARL...
+
+..."></textarea>
+                            <div class="char-count">
+                                <span id="motivation-chars">0</span> / 2000 caractères
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="competences">
+                                <i class="fas fa-chart-line"></i> Compétences en marketing digital
+                                <span class="sub-label">Décrivez vos compétences, outils maîtrisés, expériences</span>
+                            </label>
+                            <textarea id="competences" name="competences" rows="6"
+                                      placeholder="• Gestion des réseaux sociaux
+• SEO/SEA
+• Analyse Google Analytics
+• Création de contenu
+• Email marketing
+• ..."></textarea>
+                            <div class="char-count">
+                                <span id="competences-chars">0</span> / 1000 caractères
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <!-- Informations de contact -->
+                    <div class="contact-card">
+                        <h3><i class="fas fa-address-book"></i> Contacts SCSM SARL</h3>
+                        <div class="contact-links">
+                            <a href="https://scsmaubmar.org/" target="_blank" class="contact-link">
+                                <i class="fas fa-globe"></i>
+                                <span>https://scsmaubmar.org/</span>
+                            </a>
+                            <a href="mailto:scsmaubma@gmail.com" class="contact-link">
+                                <i class="fas fa-envelope"></i>
+                                <span>scsmaubma@gmail.com</span>
+                            </a>
+                            <a href="mailto:support@scsmaubmar.org" class="contact-link">
+                                <i class="fas fa-headset"></i>
+                                <span>support@scsmaubmar.org</span>
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Note finale -->
+                    <div class="final-note">
+                        <h4><i class="fas fa-star"></i> Note Finale</h4>
+                        <p>Nous cherchons un(e) professionnel(le) capable de traduire visuellement l'excellence, l'innovation et l'impact de SCSM SARL, en alliant rigueur scientifique et attractivité marketing.</p>
+                        <p class="highlight-note">Si vous êtes créatif(ve), passionné(e) par les données et les défis visuels, cette offre est pour vous !</p>
+                        <p class="advantage-note">
+                            <i class="fas fa-plus-circle"></i> 
+                            <strong>Atout:</strong> Avoir des compétences en marketing digital serait un atout.
+                        </p>
+                    </div>
+
+                    <!-- Confidentialité et soumission -->
+                    <div class="privacy-section">
+                        <div class="privacy-agreement">
+                            <input type="checkbox" id="privacy" name="privacy" required>
+                            <label for="privacy">
+                                J'accepte que mes données soient traitées dans le cadre du processus de recrutement, conformément à la politique de confidentialité de SCSM SARL.
+                            </label>
+                        </div>
+                        
+                        <div class="form-actions">
+                            <button type="button" id="resetBtn" class="btn-secondary">
+                                <i class="fas fa-redo"></i> Réinitialiser
+                            </button>
+                            <button type="button" id="previewBtn" class="btn-secondary">
+                                <i class="fas fa-eye"></i> Prévisualiser
+                            </button>
+                            <button type="submit" id="submitBtn" class="btn-primary">
+                                <i class="fas fa-paper-plane"></i> Soumettre ma candidature
+                            </button>
+                        </div>
+
+                        <div class="progress-section" id="progressSection" style="display: none;">
+                            <div class="progress-info">
+                                <span id="progressText">Envoi en cours...</span>
+                                <span id="progressPercent">0%</span>
+                            </div>
+                            <div class="progress-bar-container">
+                                <div class="progress-bar" id="progressBar"></div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <!-- Navigation rapide -->
+                <div class="info-card">
+                    <h3><i class="fas fa-rocket"></i> Navigation Rapide</h3>
+                    <div class="quick-links">
+                        <a href="{{ url_for('home') }}" class="quick-link">
+                            <i class="fas fa-home"></i> Page d'accueil
+                        </a>
+                        <a href="{{ url_for('contact') }}" class="quick-link">
+                            <i class="fas fa-envelope"></i> Contact
+                        </a>
+                        <a href="/admin/login" class="quick-link">
+                            <i class="fas fa-lock"></i> Espace Admin
+                        </a>
+                        <a href="/test-upload" class="quick-link">
+                            <i class="fas fa-upload"></i> Test Upload
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Statistiques -->
+                <div class="stats-card">
+                    <h3><i class="fas fa-chart-bar"></i> Statistiques</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" id="total-candidatures">--</div>
+                            <div class="stat-label">Candidatures</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="jours-restants">--</div>
+                            <div class="stat-label">Jours restants</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Informations importantes -->
+                <div class="info-card">
+                    <h3><i class="fas fa-map-pin"></i> Lieu de travail</h3>
+                    <p><strong>Siège social:</strong> Bertoua</p>
+                    <p><strong>Déplacements possibles:</strong> Yaoundé et Bafoussam</p>
+                    <div class="highlight-box">
+                        <i class="fas fa-comments"></i>
+                        <p>Négociation possible pour les candidatures provenant de Yaoundé et autres villes</p>
+                    </div>
+                </div>
+
+                <!-- Format acceptés -->
+                <div class="info-card">
+                    <h3><i class="fas fa-file-check"></i> Formats acceptés</h3>
+                    <ul class="format-list">
+                        <li><i class="fas fa-file-pdf"></i> PDF (.pdf)</li>
+                        <li><i class="fas fa-file-word"></i> Word (.doc, .docx)</li>
+                        <li><i class="fas fa-file-alt"></i> Texte (.txt)</li>
+                        <li><i class="fas fa-file-image"></i> Images (.jpg, .png, .gif)</li>
+                    </ul>
+                </div>
+
+                <!-- Guide -->
+                <div class="info-card">
+                    <h3><i class="fas fa-lightbulb"></i> Conseils</h3>
+                    <ol class="tips-list">
+                        <li>Vérifiez vos informations avant soumission</li>
+                        <li>Taille maximale par fichier: 20MB</li>
+                        <li>Vous recevrez un email de confirmation</li>
+                        <li>Gardez une copie de vos documents</li>
+                    </ol>
+                </div>
+
+                <!-- Partage -->
+                <div class="share-card">
+                    <h3><i class="fas fa-share-alt"></i> Partager</h3>
+                    <div class="share-buttons">
+                        <button class="share-btn" onclick="shareOnWhatsApp()">
+                            <i class="fab fa-whatsapp"></i>
+                        </button>
+                        <button class="share-btn" onclick="shareOnLinkedIn()">
+                            <i class="fab fa-linkedin"></i>
+                        </button>
+                        <button class="share-btn" onclick="shareByEmail()">
+                            <i class="fas fa-envelope"></i>
+                        </button>
+                        <button class="share-btn" onclick="copyShareLink()">
+                            <i class="fas fa-link"></i>
+                        </button>
+                    </div>
+                </div>
+            </aside>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-content">
+                <div class="footer-logo">
+                    <h3><i class="fas fa-briefcase"></i> SCSM SARL</h3>
+                    <p>Excellence, Innovation & Impact</p>
+                </div>
+                
+                <div class="footer-links">
+                    <a href="https://scsmaubmar.org/" target="_blank">
+                        <i class="fas fa-external-link-alt"></i> Site officiel
+                    </a>
+                    <a href="mailto:support@scsmaubmar.org">
+                        <i class="fas fa-question-circle"></i> Support technique
+                    </a>
+                    <a href="/admin/login">
+                        <i class="fas fa-lock"></i> Admin
+                    </a>
+                </div>
+                
+                <div class="footer-copyright">
+                    <p>© 2024 SCSM SARL. Tous droits réservés.</p>
+                    <p class="footer-note">Formulaire de candidature en ligne v2.0</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Modals -->
+    <div id="successModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-success">
+                <i class="fas fa-check-circle"></i>
+                <h2>Candidature soumise avec succès !</h2>
+                <p id="successMessage">Merci pour votre candidature. Vous allez recevoir un email de confirmation.</p>
+                <div id="fileDetails" class="file-details"></div>
+                <div class="modal-actions">
+                    <button class="btn-primary" onclick="closeModal('successModal')">
+                        <i class="fas fa-check"></i> Compris
+                    </button>
+                    <button class="btn-secondary" onclick="window.location.href='{{ url_for('confirmation') }}'">
+                        <i class="fas fa-eye"></i> Voir confirmation
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="errorModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-error">
+                <i class="fas fa-exclamation-circle"></i>
+                <h2>Erreur de soumission</h2>
+                <p id="errorMessage">Une erreur est survenue lors de l'envoi de votre candidature.</p>
+                <div class="modal-actions">
+                    <button class="btn-primary" onclick="closeModal('errorModal')">
+                        <i class="fas fa-times"></i> Fermer
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="previewModal" class="modal">
+        <div class="modal-content large">
+            <div class="modal-header">
+                <h2><i class="fas fa-eye"></i> Prévisualisation</h2>
+                <span class="close" onclick="closeModal('previewModal')">&times;</span>
+            </div>
+            <div class="modal-body" id="previewContent"></div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Afficher l'URL actuelle
+        document.getElementById('current-url').textContent = window.location.href;
         
-        # Créer un fichier ZIP en mémoire
-        memory_file = BytesIO()
+        // Initialisation au chargement de la page
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeFileUploads();
+            initializePortfolioTabs();
+            setupDragAndDrop();
+            initializeFormValidation();
+            loadStatistics();
+            
+            // Charger le nombre de candidatures
+            fetch('/health')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.candidatures_count !== undefined) {
+                        document.getElementById('total-candidatures').textContent = data.candidatures_count;
+                    }
+                })
+                .catch(error => console.error('Erreur chargement statistiques:', error));
+        });
         
-        with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
-            documents = [
-                ('cv', candidature.cv_path),
-                ('lettre_motivation', candidature.lettre_motivation_path),
-                ('portfolio', candidature.portfolio_fichier_path)
-            ]
+        // Gestion de l'upload des fichiers
+        function initializeFileUploads() {
+            const fileInputs = document.querySelectorAll('input[type="file"]');
             
-            for doc_type, path in documents:
-                if path:
-                    file_path = os.path.join(app.config['UPLOAD_FOLDER'], path)
-                    if os.path.exists(file_path):
-                        extension = path.split('.')[-1]
-                        zf.write(file_path, f"{candidature.nom_complet}_{doc_type}.{extension}")
-            
-            # Ajouter un fichier texte avec les informations
-            info_content = f"""
-            Candidature: {candidature.nom_complet}
-            Email: {candidature.email}
-            Téléphone: {candidature.telephone}
-            Ville: {candidature.ville}
-            Date de soumission: {candidature.date_soumission}
-            Statut: {candidature.statut}
-            
-            Lettre de motivation:
-            {candidature.lettre_motivation_text}
-            
-            Compétences:
-            {candidature.competences_marketing}
-            
-            Portfolio (lien): {candidature.portfolio_lien}
-            """
-            
-            zf.writestr(f"{candidature.nom_complet}_informations.txt", info_content)
+            fileInputs.forEach(input => {
+                input.addEventListener('change', function(e) {
+                    handleFileSelect(this, e);
+                });
+            });
+        }
         
-        memory_file.seek(0)
+        function handleFileSelect(input, event) {
+            const file = input.files[0];
+            const parent = input.closest('.document-upload');
+            const statusDiv = parent.querySelector('.file-status');
+            
+            if (!file) {
+                statusDiv.innerHTML = '';
+                return;
+            }
+            
+            // Vérifier la taille (20MB max)
+            const maxSize = 20 * 1024 * 1024;
+            if (file.size > maxSize) {
+                statusDiv.innerHTML = `
+                    <div class="file-name-display upload-error">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Fichier trop volumineux (${(file.size / (1024*1024)).toFixed(2)} MB > 20 MB)
+                    </div>
+                `;
+                input.value = '';
+                return;
+            }
+            
+            // Vérifier l'extension
+            const allowedExtensions = ['pdf', 'doc', 'docx', 'txt', 'jpg', 'jpeg', 'png', 'gif'];
+            const extension = file.name.split('.').pop().toLowerCase();
+            
+            if (!allowedExtensions.includes(extension)) {
+                statusDiv.innerHTML = `
+                    <div class="file-name-display upload-error">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Extension non autorisée: .${extension}
+                    </div>
+                `;
+                input.value = '';
+                return;
+            }
+            
+            // Afficher le succès
+            statusDiv.innerHTML = `
+                <div class="file-name-display upload-success">
+                    <i class="fas fa-check-circle"></i>
+                    ${file.name} (${(file.size / 1024).toFixed(0)} KB)
+                </div>
+            `;
+            
+            // Ajouter un effet visuel sur la zone d'upload
+            const uploadZone = parent.querySelector('.upload-zone');
+            uploadZone.classList.add('upload-success');
+            setTimeout(() => {
+                uploadZone.classList.remove('upload-success');
+            }, 1000);
+        }
         
-        return send_file(
-            memory_file,
-            download_name=f"Candidature_{candidature.nom_complet}_{id}.zip",
-            as_attachment=True,
-            mimetype='application/zip'
-        )
-    
-    @app.route('/admin/api/candidatures')
-    @admin_required
-    def api_candidatures():
-        """API pour récupérer les candidatures (pour dashboard)"""
-        candidatures = Candidature.query.order_by(Candidature.date_soumission.desc()).all()
-        return jsonify([c.to_dict() for c in candidatures])
-    
-    @app.route('/admin/statistiques')
-    @admin_required
-    def statistiques():
-        """Page de statistiques"""
-        # Statistiques par statut
-        stats_statut = db.session.query(
-            Candidature.statut, 
-            db.func.count(Candidature.id)
-        ).group_by(Candidature.statut).all()
+        // Gestion des onglets portfolio
+        function initializePortfolioTabs() {
+            const tabBtns = document.querySelectorAll('.tab-btn');
+            const tabContents = document.querySelectorAll('.tab-content');
+            
+            tabBtns.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const tabId = this.getAttribute('data-tab');
+                    
+                    // Mettre à jour les boutons
+                    tabBtns.forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    // Mettre à jour les contenus
+                    tabContents.forEach(content => {
+                        content.classList.remove('active');
+                        if (content.id === tabId + '-tab') {
+                            content.classList.add('active');
+                        }
+                    });
+                });
+            });
+        }
         
-        # Statistiques par mois
-        stats_mois = db.session.query(
-            db.func.strftime('%Y-%m', Candidature.date_soumission),
-            db.func.count(Candidature.id)
-        ).filter(Candidature.date_soumission.isnot(None)).group_by(db.func.strftime('%Y-%m', Candidature.date_soumission)).all()
+        // Drag and drop
+        function setupDragAndDrop() {
+            const uploadZones = document.querySelectorAll('.upload-zone');
+            
+            uploadZones.forEach(zone => {
+                zone.addEventListener('dragover', function(e) {
+                    e.preventDefault();
+                    this.classList.add('dragover');
+                });
+                
+                zone.addEventListener('dragleave', function(e) {
+                    e.preventDefault();
+                    this.classList.remove('dragover');
+                });
+                
+                zone.addEventListener('drop', function(e) {
+                    e.preventDefault();
+                    this.classList.remove('dragover');
+                    
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0) {
+                        const input = this.querySelector('input[type="file"]');
+                        input.files = files;
+                        
+                        // Déclencher l'événement change
+                        const event = new Event('change', { bubbles: true });
+                        input.dispatchEvent(event);
+                    }
+                });
+            });
+        }
         
-        # Top villes
-        top_villes = db.session.query(
-            Candidature.ville,
-            db.func.count(Candidature.id)
-        ).filter(Candidature.ville.isnot(None)).group_by(Candidature.ville).order_by(
-            db.func.count(Candidature.id).desc()
-        ).limit(10).all()
+        // Validation du formulaire
+        function initializeFormValidation() {
+            const form = document.getElementById('candidatureForm');
+            if (!form) return;
+            
+            // Validation en temps réel de l'email
+            const emailInput = document.getElementById('email');
+            if (emailInput) {
+                emailInput.addEventListener('blur', function() {
+                    const email = this.value.trim();
+                    const validationDiv = document.getElementById('email-validation');
+                    
+                    if (email && !isValidEmail(email)) {
+                        validationDiv.innerHTML = '<span style="color: #dc3545;">Email invalide</span>';
+                    } else {
+                        validationDiv.innerHTML = '';
+                    }
+                });
+            }
+            
+            // Compteurs de caractères
+            const motivationTextarea = document.getElementById('motivation');
+            const competencesTextarea = document.getElementById('competences');
+            
+            if (motivationTextarea) {
+                motivationTextarea.addEventListener('input', function() {
+                    document.getElementById('motivation-chars').textContent = this.value.length;
+                });
+            }
+            
+            if (competencesTextarea) {
+                competencesTextarea.addEventListener('input', function() {
+                    document.getElementById('competences-chars').textContent = this.value.length;
+                });
+            }
+            
+            // Soumission du formulaire
+            form.addEventListener('submit', handleFormSubmit);
+            
+            // Bouton de réinitialisation
+            const resetBtn = document.getElementById('resetBtn');
+            if (resetBtn) {
+                resetBtn.addEventListener('click', function() {
+                    if (confirm('Êtes-vous sûr de vouloir réinitialiser le formulaire ?')) {
+                        form.reset();
+                        document.querySelectorAll('.file-status').forEach(el => {
+                            el.innerHTML = '';
+                        });
+                        // Réactiver l'onglet lien par défaut
+                        document.querySelector('.tab-btn[data-tab="lien"]').click();
+                    }
+                });
+            }
+            
+            // Bouton de prévisualisation
+            const previewBtn = document.getElementById('previewBtn');
+            if (previewBtn) {
+                previewBtn.addEventListener('click', showPreview);
+            }
+        }
         
-        return render_template('admin/statistiques.html',
-                             stats_statut=stats_statut,
-                             stats_mois=stats_mois,
-                             top_villes=top_villes)
-    
-    # Route pour la page d'accueil
-    @app.route('/home')
-    @app.route('/')
-    def home():
-        """Page d'accueil avec navigation"""
-        date_limite = app.config['DATE_LIMITE']
-        aujourdhui = datetime.now().date()
-        accepte_candidatures = aujourdhui <= date_limite
+        function isValidEmail(email) {
+            const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return re.test(email);
+        }
         
-        return render_template('home.html', 
-                             accepte_candidatures=accepte_candidatures,
-                             date_limite=date_limite,
-                             email_contact=app.config.get('EMAIL_CONTACT', 'contact@example.com'),
-                             email_support=app.config.get('EMAIL_SUPPORT', 'support@example.com'))
-    
-    # Route pour le formulaire (séparée de l'accueil)
-    @app.route('/formulaire')
-    def formulaire():
-        """Page du formulaire de candidature"""
-        date_limite = app.config['DATE_LIMITE']
-        aujourdhui = datetime.now().date()
-        accepte_candidatures = aujourdhui <= date_limite
-        
-        if not accepte_candidatures:
-            flash('La période de candidature est terminée.', 'warning')
-            return redirect(url_for('home'))
-        
-        return render_template('index.html', 
-                             accepte_candidatures=accepte_candidatures,
-                             date_limite=date_limite)
-    
-    # Route de contact
-    @app.route('/contact')
-    def contact():
-        """Page de contact"""
-        return render_template('contact.html', 
-                             email_contact=app.config.get('EMAIL_CONTACT', 'contact@example.com'),
-                             email_support=app.config.get('EMAIL_SUPPORT', 'support@example.com'))
-    
-    # Routes publiques (candidats)
-    @app.route('/postuler', methods=['POST'])
-    def postuler():
-        """Soumettre une candidature"""
-        # Vérifier la date limite
-        aujourdhui = datetime.now().date()
-        if aujourdhui > app.config['DATE_LIMITE']:
-            return jsonify({
-                'success': False, 
-                'error': 'La période de candidature est terminée.'
-            }), 400
-        
-        try:
-            # Log pour déboguer
-            logger.info(f"Form data received")
-            logger.info(f"Files received: {list(request.files.keys())}")
+        function handleFormSubmit(e) {
+            e.preventDefault();
             
-            # Récupérer les données du formulaire
-            candidature = Candidature()
+            // Validation des fichiers obligatoires
+            const cvFile = document.getElementById('cv').files[0];
+            const lettreFile = document.getElementById('lettre_motivation').files[0];
             
-            # Informations personnelles
-            candidature.nom_complet = request.form.get('nom_complet', '').strip()
-            candidature.email = request.form.get('email', '').strip()
-            candidature.telephone = request.form.get('telephone', '').strip()
-            candidature.ville = request.form.get('ville', '').strip()
-            candidature.portfolio_lien = request.form.get('portfolio_lien', '').strip()
-            candidature.lettre_motivation_text = request.form.get('motivation', '').strip()
-            candidature.competences_marketing = request.form.get('competences', '').strip()
+            if (!cvFile) {
+                showError('Le CV est obligatoire');
+                return;
+            }
             
-            logger.info(f"Nom: {candidature.nom_complet}, Email: {candidature.email}")
+            if (!lettreFile) {
+                showError('La lettre de motivation est obligatoire');
+                return;
+            }
             
-            # Validation
-            if not candidature.nom_complet:
-                return jsonify({'success': False, 'error': 'Le nom complet est obligatoire'}), 400
+            // Vérifier la taille des fichiers
+            const maxSize = 20 * 1024 * 1024;
+            if (cvFile.size > maxSize) {
+                showError('Le CV dépasse la taille maximale de 20MB');
+                return;
+            }
             
-            if not candidature.email:
-                return jsonify({'success': False, 'error': 'L\'email est obligatoire'}), 400
+            if (lettreFile.size > maxSize) {
+                showError('La lettre de motivation dépasse la taille maximale de 20MB');
+                return;
+            }
             
-            # Traiter les fichiers avec plus de logging
-            file_status = {}
+            // Afficher le progress bar
+            const progressSection = document.getElementById('progressSection');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const progressPercent = document.getElementById('progressPercent');
             
-            # CV
-            if 'cv' in request.files:
-                file = request.files['cv']
-                if file and file.filename:
-                    logger.info(f"CV file received: {file.filename}, size: {file.content_length}")
-                    if allowed_file(file.filename):
-                        filename = save_file(file, candidature.nom_complet, 'cv')
-                        if filename:
-                            candidature.cv_path = filename
-                            file_status['cv'] = f"CV uploadé: {file.filename}"
-                        else:
-                            file_status['cv'] = "Erreur lors de l'upload du CV"
-                    else:
-                        file_status['cv'] = f"Extension non autorisée pour le CV: {file.filename}"
+            progressSection.style.display = 'block';
+            progressBar.style.width = '10%';
+            progressPercent.textContent = '10%';
+            progressText.textContent = 'Préparation de l\'envoi...';
             
-            # Lettre de motivation
-            if 'lettre_motivation' in request.files:
-                file = request.files['lettre_motivation']
-                if file and file.filename:
-                    logger.info(f"Lettre file received: {file.filename}")
-                    if allowed_file(file.filename):
-                        filename = save_file(file, candidature.nom_complet, 'lettre_motivation')
-                        if filename:
-                            candidature.lettre_motivation_path = filename
-                            file_status['lettre'] = f"Lettre uploadée: {file.filename}"
-                    else:
-                        file_status['lettre'] = f"Extension non autorisée pour la lettre: {file.filename}"
+            // Désactiver le bouton de soumission
+            const submitBtn = document.getElementById('submitBtn');
+            const originalText = submitBtn.innerHTML;
+            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Envoi en cours...';
+            submitBtn.disabled = true;
             
-            # Portfolio fichier
-            if 'portfolio_fichier' in request.files:
-                file = request.files['portfolio_fichier']
-                if file and file.filename:
-                    logger.info(f"Portfolio file received: {file.filename}")
-                    if allowed_file(file.filename):
-                        filename = save_file(file, candidature.nom_complet, 'portfolio')
-                        if filename:
-                            candidature.portfolio_fichier_path = filename
-                            file_status['portfolio'] = f"Portfolio uploadé: {file.filename}"
-                    else:
-                        file_status['portfolio'] = f"Extension non autorisée pour le portfolio: {file.filename}"
+            // Créer FormData
+            const formData = new FormData(this);
             
-            logger.info(f"File upload status: {file_status}")
+            // Mise à jour de la progression
+            progressBar.style.width = '30%';
+            progressPercent.textContent = '30%';
+            progressText.textContent = 'Envoi des données...';
             
-            # Sauvegarder en base de données
-            db.session.add(candidature)
-            db.session.commit()
-            
-            logger.info(f"Candidature {candidature.id} sauvegardée avec succès")
-            
-            # Préparer le message de succès avec détails des fichiers
-            message = 'Candidature soumise avec succès !'
-            if file_status:
-                message += "\nFichiers uploadés:\n"
-                for doc, status in file_status.items():
-                    message += f"- {status}\n"
-            
-            # Envoyer l'email de confirmation
-            try:
-                send_confirmation_email(candidature, app)
-            except Exception as e:
-                logger.error(f"Erreur lors de l'envoi de l'email de confirmation: {str(e)}")
-            
-            # Envoyer la notification à l'admin
-            try:
-                send_admin_notification(candidature, app)
-            except Exception as e:
-                logger.error(f"Erreur notification admin: {str(e)}")
-            
-            return jsonify({
-                'success': True,
-                'message': message,
-                'id': candidature.id,
-                'nom': candidature.nom_complet,
-                'file_status': file_status
+            // Envoyer la requête
+            fetch('/postuler', {
+                method: 'POST',
+                body: formData
             })
+            .then(response => {
+                progressBar.style.width = '60%';
+                progressPercent.textContent = '60%';
+                progressText.textContent = 'Traitement en cours...';
+                return response.json();
+            })
+            .then(data => {
+                progressBar.style.width = '100%';
+                progressPercent.textContent = '100%';
+                progressText.textContent = 'Terminé !';
+                
+                setTimeout(() => {
+                    if (data.success) {
+                        // Afficher le message de succès avec détails
+                        const successMessage = document.getElementById('successMessage');
+                        const fileDetails = document.getElementById('fileDetails');
+                        
+                        successMessage.textContent = data.message.split('\n')[0];
+                        
+                        if (data.file_status) {
+                            let fileDetailsHTML = '<h4>Détails des fichiers:</h4><ul>';
+                            for (const [doc, status] of Object.entries(data.file_status)) {
+                                fileDetailsHTML += `<li>${status}</li>`;
+                            }
+                            fileDetailsHTML += '</ul>';
+                            fileDetails.innerHTML = fileDetailsHTML;
+                        }
+                        
+                        // Afficher la modal de succès
+                        showModal('successModal');
+                        
+                        // Réinitialiser le formulaire après 3 secondes
+                        setTimeout(() => {
+                            document.getElementById('candidatureForm').reset();
+                            document.querySelectorAll('.file-status').forEach(el => {
+                                el.innerHTML = '';
+                            });
+                            progressSection.style.display = 'none';
+                            progressBar.style.width = '0%';
+                        }, 3000);
+                        
+                    } else {
+                        // Afficher l'erreur
+                        document.getElementById('errorMessage').textContent = data.error;
+                        showModal('errorModal');
+                    }
+                }, 500);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('errorMessage').textContent = 'Une erreur réseau est survenue. Veuillez réessayer.';
+                showModal('errorModal');
+            })
+            .finally(() => {
+                // Restaurer le bouton
+                setTimeout(() => {
+                    submitBtn.innerHTML = originalText;
+                    submitBtn.disabled = false;
+                    progressSection.style.display = 'none';
+                    progressBar.style.width = '0%';
+                }, 2000);
+            });
+        }
+        
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            showModal('errorModal');
+        }
+        
+        function showPreview() {
+            const form = document.getElementById('candidatureForm');
+            const previewContent = document.getElementById('previewContent');
             
-        except Exception as e:
-            logger.error(f"Erreur lors de la soumission: {str(e)}", exc_info=True)
-            db.session.rollback()
-            return jsonify({'success': False, 'error': f'Une erreur est survenue: {str(e)}'}), 500
-    
-    @app.route('/confirmation')
-    def confirmation():
-        """Page de confirmation après soumission"""
-        return render_template('confirmation.html')
-    
-    # Route publique pour la santé
-    @app.route('/health')
-    def health():
-        """Endpoint de santé pour monitoring"""
-        return jsonify({
-            'status': 'healthy', 
-            'timestamp': datetime.now().isoformat(),
-            'candidatures_count': Candidature.query.count()
-        })
-    
-    # Gestion des erreurs
-    @app.errorhandler(404)
-    def page_not_found(e):
-        return render_template('errors/404.html'), 404
-    
-    @app.errorhandler(500)
-    def internal_server_error(e):
-        logger.error(f"Erreur 500: {str(e)}")
-        return render_template('errors/500.html'), 500
-    
-    # Test route pour l'upload
-    @app.route('/test-upload', methods=['GET', 'POST'])
-    def test_upload():
-        """Route de test pour l'upload"""
-        if request.method == 'POST':
-            file = request.files.get('test_file')
-            if file:
-                filename = secure_filename(file.filename)
-                # Créer le dossier uploads s'il n'existe pas
-                os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-                filepath = os.path.join(app.config['UPLOAD_FOLDER'], f'test_{filename}')
-                file.save(filepath)
-                size = os.path.getsize(filepath)
-                return f'Fichier {filename} reçu ({size} bytes) - Sauvegardé à: {filepath}'
+            let html = '<div class="preview-content">';
+            html += '<h3>Prévisualisation de votre candidature</h3>';
+            
+            // Informations personnelles
+            html += '<h4>Informations personnelles:</h4>';
+            html += '<ul>';
+            html += `<li><strong>Nom complet:</strong> ${form.nom_complet.value}</li>`;
+            html += `<li><strong>Email:</strong> ${form.email.value}</li>`;
+            html += `<li><strong>Téléphone:</strong> ${form.telephone.value || 'Non renseigné'}</li>`;
+            html += `<li><strong>Ville:</strong> ${form.ville.value}</li>`;
+            html += '</ul>';
+            
+            // Documents
+            html += '<h4>Documents:</h4>';
+            html += '<ul>';
+            
+            // CV
+            const cvFile = form.cv.files[0];
+            html += `<li><strong>CV:</strong> ${cvFile ? cvFile.name : 'Non uploadé'}</li>`;
+            
+            // Lettre de motivation
+            const lettreFile = form.lettre_motivation.files[0];
+            html += `<li><strong>Lettre de motivation:</strong> ${lettreFile ? lettreFile.name : 'Non uploadé'}</li>`;
+            
+            // Portfolio
+            const portfolioFile = form.portfolio_fichier ? form.portfolio_fichier.files[0] : null;
+            const portfolioLink = form.portfolio_lien ? form.portfolio_lien.value : '';
+            if (portfolioFile) {
+                html += `<li><strong>Portfolio (fichier):</strong> ${portfolioFile.name}</li>`;
+            } else if (portfolioLink) {
+                html += `<li><strong>Portfolio (lien):</strong> ${portfolioLink}</li>`;
+            } else {
+                html += `<li><strong>Portfolio:</strong> Non fourni</li>`;
+            }
+            
+            html += '</ul>';
+            
+            // Contenu
+            html += '<h4>Lettre de motivation:</h4>';
+            html += `<div style="white-space: pre-wrap; background: #f8f9fa; padding: 10px; border-radius: 5px;">${form.motivation.value.substring(0, 500)}${form.motivation.value.length > 500 ? '...' : ''}</div>`;
+            
+            if (form.competences.value) {
+                html += '<h4>Compétences:</h4>';
+                html += `<div style="white-space: pre-wrap; background: #f8f9fa; padding: 10px; border-radius: 5px;">${form.competences.value.substring(0, 300)}${form.competences.value.length > 300 ? '...' : ''}</div>`;
+            }
+            
+            html += '</div>';
+            
+            previewContent.innerHTML = html;
+            showModal('previewModal');
+        }
         
-        return '''
-        <h1>Test d'Upload</h1>
-        <form method="POST" enctype="multipart/form-data">
-            <input type="file" name="test_file">
-            <button type="submit">Tester l'Upload</button>
-        </form>
-        <p>Extensions autorisées: ''' + ', '.join(app.config['ALLOWED_EXTENSIONS']) + '''</p>
-        '''
-    
-    return app
-
-
-def send_confirmation_email(candidature, app):
-    """Envoyer un email de confirmation au candidat"""
-    try:
-        msg = Message(
-            subject="Confirmation de réception de votre candidature - SCSM SARL",
-            recipients=[candidature.email],
-            sender=app.config['MAIL_DEFAULT_SENDER']
-        )
+        // Fonctions pour les modals
+        function showModal(modalId) {
+            document.getElementById(modalId).style.display = 'block';
+        }
         
-        msg.body = f"""
-        Bonjour {candidature.nom_complet},
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
         
-        Nous accusons réception de votre candidature pour le poste chez SCSM SARL.
+        // Copier le lien
+        function copyLink() {
+            const url = window.location.href;
+            navigator.clipboard.writeText(url).then(() => {
+                alert('Lien copié dans le presse-papier !');
+            });
+        }
         
-        Détails de votre soumission:
-        - Date: {candidature.date_soumission.strftime('%d/%m/%Y %H:%M')}
-        - Référence: CAND{candidature.id:06d}
+        // Fonctions de partage
+        function shareOnWhatsApp() {
+            const url = encodeURIComponent(window.location.href);
+            const text = encodeURIComponent("Postulez chez SCSM SARL - Formulaire de candidature en ligne");
+            window.open(`https://wa.me/?text=${text}%20${url}`, '_blank');
+        }
         
-        Nous examinerons votre dossier avec attention et vous contacterons si votre profil retient notre attention.
+        function shareOnLinkedIn() {
+            const url = encodeURIComponent(window.location.href);
+            window.open(`https://www.linkedin.com/sharing/share-offsite/?url=${url}`, '_blank');
+        }
         
-        Date limite de candidature: {app.config['DATE_LIMITE'].strftime('%d/%m/%Y')}
+        function shareByEmail() {
+            const subject = encodeURIComponent("Formulaire de candidature SCSM SARL");
+            const body = encodeURIComponent(`Je vous invite à postuler chez SCSM SARL via ce lien: ${window.location.href}`);
+            window.location.href = `mailto:?subject=${subject}&body=${body}`;
+        }
         
-        Pour toute question, contactez-nous à:
-        - Email: {app.config.get('EMAIL_CONTACT', 'contact@example.com')}
-        - Support: {app.config.get('EMAIL_SUPPORT', 'support@example.com')}
+        function copyShareLink() {
+            copyLink();
+        }
         
-        Cordialement,
-        L'équipe de recrutement SCSM SARL
-        """
+        // Charger les statistiques
+        function loadStatistics() {
+            // Calculer les jours restants
+            const dateLimite = new Date("{{ date_limite.strftime('%Y-%m-%d') }}");
+            const aujourdhui = new Date();
+            const diffTime = dateLimite - aujourdhui;
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            
+            document.getElementById('jours-restants').textContent = diffDays > 0 ? diffDays : 0;
+        }
         
-        mail.send(msg)
-        logger.info(f"Email de confirmation envoyé à {candidature.email}")
+        // Compte à rebours
+        function initializeCountdown() {
+            const countdownElement = document.getElementById('countdown');
+            if (!countdownElement) return;
+            
+            const dateLimite = new Date("{{ date_limite.strftime('%Y-%m-%d') }}");
+            
+            function updateCountdown() {
+                const maintenant = new Date();
+                const difference = dateLimite - maintenant;
+                
+                if (difference <= 0) {
+                    countdownElement.textContent = "Terminé";
+                    return;
+                }
+                
+                const jours = Math.floor(difference / (1000 * 60 * 60 * 24));
+                const heures = Math.floor((difference % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const minutes = Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60));
+                
+                countdownElement.textContent = `${jours}j ${heures}h ${minutes}m`;
+            }
+            
+            updateCountdown();
+            setInterval(updateCountdown, 60000); // Mise à jour chaque minute
+        }
         
-    except Exception as e:
-        logger.error(f"Erreur lors de l'envoi de l'email de confirmation: {str(e)}")
-
-
-def send_admin_notification(candidature, app):
-    """Notifier l'admin de la nouvelle candidature"""
-    try:
-        admin_email = app.config.get('EMAIL_CONTACT')
-        if not admin_email:
-            logger.warning("EMAIL_CONTACT non configuré, notification admin ignorée")
-            return
+        // Initialiser le compte à rebours
+        initializeCountdown();
         
-        msg = Message(
-            subject=f"[SCSM] Nouvelle candidature: {candidature.nom_complet}",
-            recipients=[admin_email],
-            sender=app.config['MAIL_DEFAULT_SENDER']
-        )
-        
-        msg.body = f"""
-        Nouvelle candidature reçue:
-        
-        Candidat: {candidature.nom_complet}
-        Email: {candidature.email}
-        Téléphone: {candidature.telephone}
-        Ville: {candidature.ville}
-        Date: {candidature.date_soumission.strftime('%d/%m/%Y %H:%M')}
-        ID: CAND{candidature.id:06d}
-        
-        Pour voir les détails, connectez-vous à l'interface admin.
-        """
-        
-        mail.send(msg)
-        logger.info(f"Notification admin envoyée pour candidature {candidature.id}")
-        
-    except Exception as e:
-        logger.error(f"Erreur notification admin: {str(e)}")
-
-
-if __name__ == '__main__':
-    app = create_app()
-    port = int(os.environ.get('PORT', 5000))
-    app.run(debug=True, host='0.0.0.0', port=port)
+        // Fermer les modals en cliquant en dehors
+        window.addEventListener('click', function(event) {
+            const modals = document.querySelectorAll('.modal');
+            modals.forEach(modal => {
+                if (event.target == modal) {
+                    modal.style.display = 'none';
+                }
+            });
+        });
+    </script>
+</body>
+</html>
