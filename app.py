@@ -238,7 +238,8 @@ def create_app(config_name='default'):
         
         return render_template('admin/dashboard.html', 
                              stats=stats, 
-                             candidatures=recent_candidatures)
+                             candidatures=recent_candidatures,
+                             date_limite=app.config['DATE_LIMITE'])
     
     @app.route('/admin/candidatures')
     @admin_required
