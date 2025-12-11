@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confirmation - SCSM SARL</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .confirmation-container {
+            background: white;
+            border-radius: 20px;
+            padding: 50px;
+            margin-top: 100px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 800px;
+            animation: fadeIn 0.8s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .success-icon {
+            font-size: 5rem;
+            color: #28a745;
+            margin-bottom: 30px;
+            animation: bounce 1s ease infinite alternate;
+        }
+        @keyframes bounce {
+            from { transform: translateY(0); }
+            to { transform: translateY(-10px); }
+        }
+        .confirmation-number {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            border-left: 5px solid #667eea;
+            margin: 20px 0;
+        }
+        .next-steps {
+            background: #e8f4f8;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 30px 0;
+        }
+        .step-item {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+        .step-number {
+            background: #667eea;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 15px;
+            flex-shrink: 0;
+        }
+        .action-buttons .btn {
+            padding: 12px 30px;
+            border-radius: 50px;
+            font-weight: bold;
+            margin: 5px;
+            transition: all 0.3s;
+        }
+        .action-buttons .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        .timer {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #dc3545;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        .footer-note {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #dee2e6;
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+        .qr-code {
+            max-width: 150px;
+            margin: 20px auto;
+            padding: 10px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-10">
+                <div class="confirmation-container text-center">
+                    <!-- Icône de succès -->
+                    <div class="success-icon">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    
+                    <!-- Titre -->
+                    <h1 class="display-5 mb-4">Candidature Soumise avec Succès !</h1>
+                    
+                    <!-- Message principal -->
+                    <p class="lead mb-4">
+                        Merci pour votre candidature. Nous avons bien reçu votre dossier et nous l'examinerons avec attention.
+                    </p>
+                    
+                    <!-- Numéro de confirmation -->
+                    <div class="confirmation-number">
+                        <h4><i class="fas fa-hashtag"></i> Référence de votre candidature</h4>
+                        <div class="display-6 fw-bold text-primary" id="confirmationRef">
+                            CAND{{ "%06d" | format(range(100000, 999999) | random) }}
+                        </div>
+                        <small class="text-muted">Conservez cette référence pour toute communication future</small>
+                    </div>
+                    
+                    <!-- Détails -->
+                    <div class="row mt-5">
+                        <div class="col-md-6">
+                            <div class="card h-100">
+                                <div class="card-body">
+                                    <h5><i class="fas fa-envelope"></i> Email de confirmation</h5>
+                                    <p>Un email de confirmation a été envoyé à l'adresse que vous avez fournie.</p>
+                                    <div class="alert alert-warning">
+                                        <i class="fas fa-exclamation-triangle"></i>
+                                        Vérifiez vos spams si vous ne le recevez pas dans 5 minutes
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card h-100">
+                                <div class="card-body">
+                                    <h5><i class="fas fa-clock"></i> Délai de traitement</h5>
+                                    <p>Notre équipe examinera votre dossier dans les prochains jours.</p>
+                                    <p class="mb-0"><strong>Date limite:</strong> 31 décembre 2025</p>
+                                    <p><strong>Réponse:</strong> Sous 2-4 semaines après la date limite</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Prochaines étapes -->
+                    <div class="next-steps text-start mt-4">
+                        <h4 class="mb-4"><i class="fas fa-list-ol"></i> Prochaines étapes</h4>
+                        
+                        <div class="step-item">
+                            <div class="step-number">1</div>
+                            <div>
+                                <h6>Email de confirmation</h6>
+                                <p class="mb-0">Conservez l'email que vous recevrez comme preuve de soumission</p>
+                            </div>
+                        </div>
+                        
+                        <div class="step-item">
+                            <div class="step-number">2</div>
+                            <div>
+                                <h6>Examen du dossier</h6>
+                                <p class="mb-0">Notre équipe examinera votre candidature avec attention</p>
+                            </div>
+                        </div>
+                        
+                        <div class="step-item">
+                            <div class="step-number">3</div>
+                            <div>
+                                <h6>Réponse finale</h6>
+                                <p class="mb-0">Vous recevrez une réponse par email quelle que soit l'issue</p>
+                            </div>
+                        </div>
+                        
+                        <div class="step-item">
+                            <div class="step-number">4</div>
+                            <div>
+                                <h6>Entretien éventuel</h6>
+                                <p class="mb-0">Si votre profil est retenu, nous vous contacterons pour un entretien</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Redirection automatique -->
+                    <div class="alert alert-info mt-4">
+                        <i class="fas fa-redo"></i>
+                        Redirection automatique vers la page d'accueil dans 
+                        <span class="timer" id="countdown">10</span> secondes
+                    </div>
+                    
+                    <!-- QR Code pour mobile -->
+                    <div class="qr-code d-none d-md-block">
+                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data={{ url_for('home', _external=True) }}" 
+                             alt="QR Code vers l'accueil" class="img-fluid">
+                        <small class="text-muted">Scannez pour retour à l'accueil</small>
+                    </div>
+                    
+                    <!-- Boutons d'action -->
+                    <div class="action-buttons mt-5">
+                        <a href="{{ url_for('home') }}" class="btn btn-primary">
+                            <i class="fas fa-home"></i> Retour à l'accueil
+                        </a>
+                        <button onclick="window.print()" class="btn btn-outline-primary">
+                            <i class="fas fa-print"></i> Imprimer cette page
+                        </button>
+                        <a href="{{ url_for('formulaire') }}" class="btn btn-outline-success">
+                            <i class="fas fa-plus"></i> Nouvelle candidature
+                        </a>
+                    </div>
+                    
+                    <!-- Note de pied de page -->
+                    <div class="footer-note">
+                        <p class="mb-2">
+                            <i class="fas fa-question-circle"></i>
+                            Pour toute question concernant votre candidature, contactez-nous à 
+                            <strong>{{ email_contact }}</strong> en précisant votre numéro de référence.
+                        </p>
+                        <p class="mb-0">
+                            <i class="fas fa-info-circle"></i>
+                            Cette confirmation ne garantit pas que votre candidature sera retenue, 
+                            mais atteste que nous avons bien reçu votre dossier.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Compte à rebours pour la redirection
+            let countdown = 10;
+            const countdownElement = document.getElementById('countdown');
+            const countdownInterval = setInterval(() => {
+                countdown--;
+                countdownElement.textContent = countdown;
+                
+                if (countdown <= 0) {
+                    clearInterval(countdownInterval);
+                    window.location.href = "{{ url_for('home') }}";
+                }
+            }, 1000);
+            
+            // Générer une référence aléatoire si ce n'est pas déjà fait
+            function generateReference() {
+                const ref = 'CAND' + Math.floor(100000 + Math.random() * 900000);
+                document.getElementById('confirmationRef').textContent = ref;
+                
+                // Stocker dans le localStorage pour référence future
+                localStorage.setItem('lastCandidatureRef', ref);
+                localStorage.setItem('lastCandidatureDate', new Date().toISOString());
+            }
+            
+            // Vérifier si on a une référence existante
+            const lastRef = localStorage.getItem('lastCandidatureRef');
+            if (!lastRef) {
+                generateReference();
+            }
+            
+            // Effet de confetti (simplifié)
+            function createConfetti() {
+                const confettiCount = 50;
+                const container = document.querySelector('.confirmation-container');
+                
+                for (let i = 0; i < confettiCount; i++) {
+                    const confetti = document.createElement('div');
+                    confetti.innerHTML = '🎉';
+                    confetti.style.position = 'fixed';
+                    confetti.style.fontSize = Math.random() * 20 + 10 + 'px';
+                    confetti.style.left = Math.random() * 100 + 'vw';
+                    confetti.style.top = '-50px';
+                    confetti.style.opacity = '0.8';
+                    confetti.style.zIndex = '9999';
+                    confetti.style.pointerEvents = 'none';
+                    confetti.style.animation = `fall ${Math.random() * 3 + 2}s linear forwards`;
+                    
+                    document.body.appendChild(confetti);
+                    
+                    // Supprimer après l'animation
+                    setTimeout(() => {
+                        confetti.remove();
+                    }, 5000);
+                }
+            }
+            
+            // Créer des confettis au chargement
+            createConfetti();
+            
+            // Ajouter le style pour l'animation de chute
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes fall {
+                    to {
+                        transform: translateY(100vh) rotate(${Math.random() * 360}deg);
+                        opacity: 0;
+                    }
+                }
+            `;
+            document.head.appendChild(style);
+        });
+    </script>
+</body>
+</html>

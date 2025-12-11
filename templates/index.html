@@ -7,9 +7,81 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
+    <!-- Bootstrap CSS pour les spinners -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <meta name="description" content="Formulaire de candidature en ligne pour SCSM SARL - Date limite: 31 décembre 2025">
+    <style>
+        /* Styles supplémentaires pour l'upload */
+        .file-name-display {
+            font-size: 0.9em;
+            padding: 8px 12px;
+            background-color: #d4edda;
+            border-radius: 4px;
+            border-left: 4px solid #28a745;
+            margin-top: 5px;
+            color: #155724;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .file-name-display i {
+            color: #28a745;
+        }
+        
+        .upload-success {
+            border-color: #28a745;
+            background-color: #d4edda;
+        }
+        
+        .upload-error {
+            border-color: #dc3545;
+            background-color: #f8d7da;
+        }
+        
+        .upload-warning {
+            border-color: #ffc107;
+            background-color: #fff3cd;
+        }
+        
+        .spinner-border {
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        
+        /* Navigation */
+        .admin-nav {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+        }
+        
+        .admin-nav a {
+            background: #343a40;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            text-decoration: none;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .admin-nav a:hover {
+            background: #495057;
+        }
+    </style>
 </head>
 <body>
+    <!-- Navigation admin -->
+    <div class="admin-nav">
+        <a href="{{ url_for('home') }}">
+            <i class="fas fa-home"></i> Accueil
+        </a>
+    </div>
+    
     <div class="container">
         <!-- En-tête avec logo -->
         <header class="header">
@@ -23,7 +95,7 @@
                     <i class="fas fa-calendar-alt"></i>
                     <div>
                         <strong>Date limite</strong>
-                        <p>31 décembre 2025</p>
+                        <p>{{ date_limite.strftime('%d/%m/%Y') }}</p>
                     </div>
                 </div>
                 <div class="counter-card" id="counter">
@@ -52,6 +124,12 @@
                 <div class="form-header">
                     <h2><i class="fas fa-file-signature"></i> Formulaire de Candidature</h2>
                     <p class="form-subtitle">Remplissez soigneusement tous les champs obligatoires (*)</p>
+                    {% if not accepte_candidatures %}
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle"></i> 
+                        La période de candidature est terminée. Vous pouvez toujours remplir le formulaire pour tester.
+                    </div>
+                    {% endif %}
                 </div>
 
                 <form id="candidatureForm" enctype="multipart/form-data">
@@ -116,7 +194,7 @@
                                 <i class="fas fa-file-contract"></i>
                                 <div>
                                     <h4>Curriculum Vitae (CV) *</h4>
-                                    <p>Format: PDF, DOC, DOCX (max 5MB)</p>
+                                    <p>Format: PDF, DOC, DOCX (max 20MB)</p>
                                 </div>
                             </div>
                             <div class="upload-zone" id="cv-zone">
@@ -127,6 +205,7 @@
                                 </div>
                             </div>
                             <div class="file-preview" id="cv-preview"></div>
+                            <div class="file-status" id="cv-status"></div>
                         </div>
 
                         <!-- Portfolio -->
@@ -135,7 +214,7 @@
                                 <i class="fas fa-briefcase"></i>
                                 <div>
                                     <h4>Portfolio</h4>
-                                    <p>Lien en ligne ou fichier (PDF, images, max 10MB)</p>
+                                    <p>Lien en ligne ou fichier (PDF, images, max 20MB)</p>
                                 </div>
                             </div>
                             
@@ -153,13 +232,14 @@
                                 <div class="tab-content" id="fichier-tab">
                                     <div class="upload-zone" id="portfolio-zone">
                                         <input type="file" id="portfolio_fichier" name="portfolio_fichier" 
-                                               accept=".pdf,.jpg,.jpeg,.png">
+                                               accept=".pdf,.jpg,.jpeg,.png,.gif">
                                         <div class="upload-content">
                                             <i class="fas fa-cloud-upload-alt"></i>
                                             <p>Glissez-déposez votre portfolio ou <span>parcourir</span></p>
                                         </div>
                                     </div>
                                     <div class="file-preview" id="portfolio-preview"></div>
+                                    <div class="file-status" id="portfolio-status"></div>
                                 </div>
                             </div>
                         </div>
@@ -170,7 +250,7 @@
                                 <i class="fas fa-envelope-open-text"></i>
                                 <div>
                                     <h4>Lettre de motivation *</h4>
-                                    <p>Format: PDF, DOC, DOCX, TXT (max 3MB)</p>
+                                    <p>Format: PDF, DOC, DOCX, TXT (max 20MB)</p>
                                 </div>
                             </div>
                             <div class="upload-zone" id="lettre-zone">
@@ -182,6 +262,7 @@
                                 </div>
                             </div>
                             <div class="file-preview" id="lettre-preview"></div>
+                            <div class="file-status" id="lettre-status"></div>
                         </div>
                     </fieldset>
 
@@ -289,6 +370,25 @@ Je souhaite exprimer mon vif intérêt pour le poste chez SCSM SARL...
 
             <!-- Sidebar -->
             <aside class="sidebar">
+                <!-- Navigation rapide -->
+                <div class="info-card">
+                    <h3><i class="fas fa-rocket"></i> Navigation Rapide</h3>
+                    <div class="quick-links">
+                        <a href="{{ url_for('home') }}" class="quick-link">
+                            <i class="fas fa-home"></i> Page d'accueil
+                        </a>
+                        <a href="{{ url_for('contact') }}" class="quick-link">
+                            <i class="fas fa-envelope"></i> Contact
+                        </a>
+                        <a href="/admin/login" class="quick-link">
+                            <i class="fas fa-lock"></i> Espace Admin
+                        </a>
+                        <a href="/test-upload" class="quick-link">
+                            <i class="fas fa-upload"></i> Test Upload
+                        </a>
+                    </div>
+                </div>
+
                 <!-- Statistiques -->
                 <div class="stats-card">
                     <h3><i class="fas fa-chart-bar"></i> Statistiques</h3>
@@ -322,7 +422,7 @@ Je souhaite exprimer mon vif intérêt pour le poste chez SCSM SARL...
                         <li><i class="fas fa-file-pdf"></i> PDF (.pdf)</li>
                         <li><i class="fas fa-file-word"></i> Word (.doc, .docx)</li>
                         <li><i class="fas fa-file-alt"></i> Texte (.txt)</li>
-                        <li><i class="fas fa-file-image"></i> Images (.jpg, .png)</li>
+                        <li><i class="fas fa-file-image"></i> Images (.jpg, .png, .gif)</li>
                     </ul>
                 </div>
 
@@ -331,7 +431,7 @@ Je souhaite exprimer mon vif intérêt pour le poste chez SCSM SARL...
                     <h3><i class="fas fa-lightbulb"></i> Conseils</h3>
                     <ol class="tips-list">
                         <li>Vérifiez vos informations avant soumission</li>
-                        <li>Taille maximale par fichier: 10MB</li>
+                        <li>Taille maximale par fichier: 20MB</li>
                         <li>Vous recevrez un email de confirmation</li>
                         <li>Gardez une copie de vos documents</li>
                     </ol>
@@ -373,6 +473,9 @@ Je souhaite exprimer mon vif intérêt pour le poste chez SCSM SARL...
                     <a href="mailto:support@scsmaubmar.org">
                         <i class="fas fa-question-circle"></i> Support technique
                     </a>
+                    <a href="/admin/login">
+                        <i class="fas fa-lock"></i> Admin
+                    </a>
                 </div>
                 
                 <div class="footer-copyright">
@@ -390,12 +493,28 @@ Je souhaite exprimer mon vif intérêt pour le poste chez SCSM SARL...
                 <i class="fas fa-check-circle"></i>
                 <h2>Candidature soumise avec succès !</h2>
                 <p id="successMessage">Merci pour votre candidature. Vous allez recevoir un email de confirmation.</p>
+                <div id="fileDetails" class="file-details"></div>
                 <div class="modal-actions">
                     <button class="btn-primary" onclick="closeModal('successModal')">
                         <i class="fas fa-check"></i> Compris
                     </button>
-                    <button class="btn-secondary" onclick="printConfirmation()">
-                        <i class="fas fa-print"></i> Imprimer
+                    <button class="btn-secondary" onclick="window.location.href='{{ url_for('confirmation') }}'">
+                        <i class="fas fa-eye"></i> Voir confirmation
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="errorModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-error">
+                <i class="fas fa-exclamation-circle"></i>
+                <h2>Erreur de soumission</h2>
+                <p id="errorMessage">Une erreur est survenue lors de l'envoi de votre candidature.</p>
+                <div class="modal-actions">
+                    <button class="btn-primary" onclick="closeModal('errorModal')">
+                        <i class="fas fa-times"></i> Fermer
                     </button>
                 </div>
             </div>
@@ -414,18 +533,220 @@ Je souhaite exprimer mon vif intérêt pour le poste chez SCSM SARL...
 
     <!-- Scripts -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         // Afficher l'URL actuelle
         document.getElementById('current-url').textContent = window.location.href;
         
-        // Initialiser le compte à rebours
-        initializeCountdown();
+        // Gestion de l'upload des fichiers
+        document.addEventListener('DOMContentLoaded', function() {
+            const fileInputs = document.querySelectorAll('input[type="file"]');
+            
+            fileInputs.forEach(input => {
+                input.addEventListener('change', function(e) {
+                    const file = e.target.files[0];
+                    if (file) {
+                        // Afficher le nom du fichier
+                        const parent = this.closest('.document-upload');
+                        const statusDiv = parent.querySelector('.file-status');
+                        
+                        // Vérifier la taille
+                        const maxSize = 20 * 1024 * 1024; // 20MB
+                        if (file.size > maxSize) {
+                            statusDiv.innerHTML = `
+                                <div class="file-name-display upload-error">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                    Fichier trop volumineux (${(file.size / (1024*1024)).toFixed(2)} MB > 20 MB)
+                                </div>
+                            `;
+                            this.value = ''; // Effacer la sélection
+                            return;
+                        }
+                        
+                        // Vérifier l'extension
+                        const allowedExtensions = ['pdf', 'doc', 'docx', 'txt', 'jpg', 'jpeg', 'png', 'gif'];
+                        const extension = file.name.split('.').pop().toLowerCase();
+                        
+                        if (!allowedExtensions.includes(extension)) {
+                            statusDiv.innerHTML = `
+                                <div class="file-name-display upload-error">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                    Extension non autorisée: .${extension}
+                                </div>
+                            `;
+                            this.value = ''; // Effacer la sélection
+                            return;
+                        }
+                        
+                        // Afficher le succès
+                        statusDiv.innerHTML = `
+                            <div class="file-name-display upload-success">
+                                <i class="fas fa-check-circle"></i>
+                                ${file.name} (${(file.size / 1024).toFixed(0)} KB)
+                            </div>
+                        `;
+                        
+                        // Ajouter un effet visuel sur la zone d'upload
+                        const uploadZone = parent.querySelector('.upload-zone');
+                        uploadZone.classList.add('upload-success');
+                        setTimeout(() => {
+                            uploadZone.classList.remove('upload-success');
+                        }, 1000);
+                    }
+                });
+            });
+            
+            // Gestion de la soumission du formulaire
+            const form = document.getElementById('candidatureForm');
+            if (form) {
+                form.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    
+                    // Afficher le progress bar
+                    const progressSection = document.getElementById('progressSection');
+                    const progressBar = document.getElementById('progressBar');
+                    const progressText = document.getElementById('progressText');
+                    const progressPercent = document.getElementById('progressPercent');
+                    
+                    progressSection.style.display = 'block';
+                    progressBar.style.width = '10%';
+                    progressPercent.textContent = '10%';
+                    progressText.textContent = 'Préparation de l\'envoi...';
+                    
+                    // Afficher un indicateur de chargement
+                    const submitBtn = document.getElementById('submitBtn');
+                    const originalText = submitBtn.innerHTML;
+                    submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Envoi en cours...';
+                    submitBtn.disabled = true;
+                    
+                    const formData = new FormData(this);
+                    
+                    // Mise à jour de la progression
+                    progressBar.style.width = '30%';
+                    progressPercent.textContent = '30%';
+                    progressText.textContent = 'Envoi des données...';
+                    
+                    fetch('/postuler', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => {
+                        progressBar.style.width = '60%';
+                        progressPercent.textContent = '60%';
+                        progressText.textContent = 'Traitement en cours...';
+                        return response.json();
+                    })
+                    .then(data => {
+                        progressBar.style.width = '100%';
+                        progressPercent.textContent = '100%';
+                        progressText.textContent = 'Terminé !';
+                        
+                        if (data.success) {
+                            // Afficher le message de succès avec détails
+                            const successMessage = document.getElementById('successMessage');
+                            const fileDetails = document.getElementById('fileDetails');
+                            
+                            successMessage.textContent = data.message.split('\n')[0];
+                            
+                            if (data.file_status) {
+                                let fileDetailsHTML = '<h4>Détails des fichiers:</h4><ul>';
+                                for (const [doc, status] of Object.entries(data.file_status)) {
+                                    fileDetailsHTML += `<li>${status}</li>`;
+                                }
+                                fileDetailsHTML += '</ul>';
+                                fileDetails.innerHTML = fileDetailsHTML;
+                            }
+                            
+                            // Afficher la modal de succès
+                            showModal('successModal');
+                            
+                            // Réinitialiser le formulaire après 3 secondes
+                            setTimeout(() => {
+                                form.reset();
+                                document.querySelectorAll('.file-status').forEach(el => {
+                                    el.innerHTML = '';
+                                });
+                                progressSection.style.display = 'none';
+                                progressBar.style.width = '0%';
+                            }, 3000);
+                            
+                        } else {
+                            // Afficher l'erreur
+                            document.getElementById('errorMessage').textContent = data.error;
+                            showModal('errorModal');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        document.getElementById('errorMessage').textContent = 'Une erreur réseau est survenue. Veuillez réessayer.';
+                        showModal('errorModal');
+                    })
+                    .finally(() => {
+                        // Restaurer le bouton
+                        submitBtn.innerHTML = originalText;
+                        submitBtn.disabled = false;
+                        setTimeout(() => {
+                            progressSection.style.display = 'none';
+                            progressBar.style.width = '0%';
+                        }, 2000);
+                    });
+                });
+            }
+            
+            // Initialiser les autres fonctionnalités
+            initializeCountdown();
+            loadStatistics();
+            setupDragAndDrop();
+            
+            // Charger le nombre de candidatures
+            fetch('/health')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.candidatures_count !== undefined) {
+                        document.getElementById('total-candidatures').textContent = data.candidatures_count;
+                    }
+                })
+                .catch(error => console.error('Erreur chargement statistiques:', error));
+        });
         
-        // Charger les statistiques
-        loadStatistics();
+        // Fonctions pour les modals
+        function showModal(modalId) {
+            document.getElementById(modalId).style.display = 'block';
+        }
         
-        // Configurer le drag & drop
-        setupDragAndDrop();
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+        
+        // Copier le lien
+        function copyLink() {
+            const url = window.location.href;
+            navigator.clipboard.writeText(url).then(() => {
+                alert('Lien copié dans le presse-papier !');
+            });
+        }
+        
+        // Fonctions de partage
+        function shareOnWhatsApp() {
+            const url = encodeURIComponent(window.location.href);
+            const text = encodeURIComponent("Postulez chez SCSM SARL - Formulaire de candidature en ligne");
+            window.open(`https://wa.me/?text=${text}%20${url}`, '_blank');
+        }
+        
+        function shareOnLinkedIn() {
+            const url = encodeURIComponent(window.location.href);
+            window.open(`https://www.linkedin.com/sharing/share-offsite/?url=${url}`, '_blank');
+        }
+        
+        function shareByEmail() {
+            const subject = encodeURIComponent("Formulaire de candidature SCSM SARL");
+            const body = encodeURIComponent(`Je vous invite à postuler chez SCSM SARL via ce lien: ${window.location.href}`);
+            window.location.href = `mailto:?subject=${subject}&body=${body}`;
+        }
+        
+        function copyShareLink() {
+            copyLink();
+        }
     </script>
 </body>
 </html>
