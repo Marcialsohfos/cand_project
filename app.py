@@ -4,7 +4,7 @@ import zipfile
 from datetime import datetime
 from io import BytesIO
 from functools import wraps
-from flask import Flask, render_template, request, jsonify, send_file, url_for, flash, redirect, session, abort, current_app
+from flask import Flask, render_template, request, jsonify, send_file, url_for, flash, redirect, session, abort
 from flask_sqlalchemy import SQLAlchemy
 from flask_mail import Mail, Message
 from flask_cors import CORS
@@ -95,123 +95,44 @@ def create_app(config_name='default'):
     
     # Helper functions
     def allowed_file(filename):
+        """Vérifier si l'extension du fichier est autorisée"""
+        if not filename:
+            return False
         return '.' in filename and \
                filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
     
     def save_file(file, nom_candidat, type_document):
         """Sauvegarder un fichier uploadé"""
         if file and file.filename and allowed_file(file.filename):
-            # Sécuriser le nom du fichier
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            original_name = secure_filename(file.filename)
-            extension = original_name.rsplit('.', 1)[-1].lower() if '.' in original_name else ''
-            
-            # Nom du fichier
-            nom_simplifie = ''.join(c for c in nom_candidat if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
-            new_filename = f"{timestamp}_{nom_simplifie}_{type_document}.{extension}"
-            
-            # Chemin complet
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
-            
-            # Sauvegarder
-            file.save(filepath)
-            
-            logger.info(f"Fichier sauvegardé: {new_filename}")
-            return new_filename
+            try:
+                # Sécuriser le nom du fichier
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                original_name = secure_filename(file.filename)
+                extension = original_name.rsplit('.', 1)[-1].lower() if '.' in original_name else ''
+                
+                # Nom du fichier
+                nom_simplifie = ''.join(c for c in nom_candidat if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
+                if not nom_simplifie:
+                    nom_simplifie = 'candidat'
+                
+                new_filename = f"{timestamp}_{nom_simplifie}_{type_document}.{extension}"
+                
+                # Créer le dossier si inexistant
+                os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+                
+                # Chemin complet
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
+                
+                # Sauvegarder
+                file.save(filepath)
+                
+                logger.info(f"Fichier sauvegardé: {new_filename} ({os.path.getsize(filepath)} bytes)")
+                return new_filename
+            except Exception as e:
+                logger.error(f"Erreur lors de la sauvegarde du fichier: {str(e)}")
+                return None
         
         return None
-    
-    # Routes publiques (candidats)
-    @app.route('/')
-    def index():
-        """Page principale du formulaire"""
-        date_limite = app.config['DATE_LIMITE']
-        aujourdhui = datetime.now().date()
-        accepte_candidatures = aujourdhui <= date_limite
-        
-        return render_template('index.html', 
-                             accepte_candidatures=accepte_candidatures,
-                             date_limite=date_limite)
-    
-    @app.route('/postuler', methods=['POST'])
-    def postuler():
-        """Soumettre une candidature"""
-        # Vérifier la date limite
-        aujourdhui = datetime.now().date()
-        if aujourdhui > app.config['DATE_LIMITE']:
-            return jsonify({
-                'success': False, 
-                'error': 'La période de candidature est terminée.'
-            }), 400
-        
-        try:
-            # Récupérer les données du formulaire
-            candidature = Candidature()
-            
-            # Informations personnelles
-            candidature.nom_complet = request.form.get('nom_complet', '').strip()
-            candidature.email = request.form.get('email', '').strip()
-            candidature.telephone = request.form.get('telephone', '').strip()
-            candidature.ville = request.form.get('ville', '').strip()
-            candidature.portfolio_lien = request.form.get('portfolio_lien', '').strip()
-            candidature.lettre_motivation_text = request.form.get('motivation', '').strip()
-            candidature.competences_marketing = request.form.get('competences', '').strip()
-            
-            # Validation
-            if not candidature.nom_complet:
-                return jsonify({'success': False, 'error': 'Le nom complet est obligatoire'}), 400
-            
-            if not candidature.email:
-                return jsonify({'success': False, 'error': 'L\'email est obligatoire'}), 400
-            
-            # Traiter les fichiers
-            if 'cv' in request.files:
-                file = request.files['cv']
-                if file and file.filename:
-                    filename = save_file(file, candidature.nom_complet, 'cv')
-                    if filename:
-                        candidature.cv_path = filename
-            
-            if 'lettre_motivation' in request.files:
-                file = request.files['lettre_motivation']
-                if file and file.filename:
-                    filename = save_file(file, candidature.nom_complet, 'lettre_motivation')
-                    if filename:
-                        candidature.lettre_motivation_path = filename
-            
-            if 'portfolio_fichier' in request.files:
-                file = request.files['portfolio_fichier']
-                if file and file.filename:
-                    filename = save_file(file, candidature.nom_complet, 'portfolio')
-                    if filename:
-                        candidature.portfolio_fichier_path = filename
-            
-            # Sauvegarder en base de données
-            db.session.add(candidature)
-            db.session.commit()
-            
-            # Envoyer l'email de confirmation
-            send_confirmation_email(candidature, app)
-            
-            # Envoyer la notification à l'admin
-            send_admin_notification(candidature, app)
-            
-            return jsonify({
-                'success': True,
-                'message': 'Candidature soumise avec succès !',
-                'id': candidature.id,
-                'nom': candidature.nom_complet
-            })
-            
-        except Exception as e:
-            logger.error(f"Erreur lors de la soumission: {str(e)}")
-            db.session.rollback()
-            return jsonify({'success': False, 'error': 'Une erreur est survenue. Veuillez réessayer.'}), 500
-    
-    @app.route('/confirmation')
-    def confirmation():
-        """Page de confirmation après soumission"""
-        return render_template('confirmation.html')
     
     # Routes d'authentification admin
     @app.route('/admin/login', methods=['GET', 'POST'])
@@ -222,15 +143,22 @@ def create_app(config_name='default'):
             password = request.form.get('password')
             
             # Vérifier les identifiants
-            if (username == app.config['ADMIN_USERNAME'] and 
-                check_password_hash(app.config.get('ADMIN_PASSWORD_HASH', ''), password)):
-                
-                session['admin_logged_in'] = True
-                session.permanent = True
-                flash('Connexion réussie!', 'success')
-                return redirect(url_for('admin_dashboard'))
-            else:
-                flash('Identifiants incorrects', 'error')
+            if username == app.config['ADMIN_USERNAME']:
+                # Si ADMIN_PASSWORD_HASH est configuré, vérifier le hash
+                if app.config.get('ADMIN_PASSWORD_HASH'):
+                    if check_password_hash(app.config['ADMIN_PASSWORD_HASH'], password):
+                        session['admin_logged_in'] = True
+                        session.permanent = True
+                        flash('Connexion réussie!', 'success')
+                        return redirect(url_for('admin_dashboard'))
+                # Sinon, vérifier le mot de passe en clair (pour développement)
+                elif password == app.config.get('ADMIN_PASSWORD', ''):
+                    session['admin_logged_in'] = True
+                    session.permanent = True
+                    flash('Connexion réussie!', 'success')
+                    return redirect(url_for('admin_dashboard'))
+            
+            flash('Identifiants incorrects', 'error')
         
         return render_template('admin_login.html')
     
@@ -239,7 +167,7 @@ def create_app(config_name='default'):
         """Déconnexion admin"""
         session.pop('admin_logged_in', None)
         flash('Vous avez été déconnecté', 'info')
-        return redirect(url_for('admin_login'))
+        return redirect(url_for('home'))
     
     # Routes admin protégées
     @app.route('/admin')
@@ -258,7 +186,7 @@ def create_app(config_name='default'):
             Candidature.date_soumission.desc()
         ).limit(10).all()
         
-        return render_template('admin_dashboard.html', 
+        return render_template('admin/dashboard.html', 
                              stats=stats, 
                              candidatures=recent_candidatures)
     
@@ -289,9 +217,9 @@ def create_app(config_name='default'):
         
         candidatures = query.order_by(
             Candidature.date_soumission.desc()
-        ).paginate(page=page, per_page=per_page)
+        ).paginate(page=page, per_page=per_page, error_out=False)
         
-        return render_template('admin_candidatures.html', 
+        return render_template('admin/candidatures.html', 
                              candidatures=candidatures,
                              current_statut=statut,
                              search=search)
@@ -311,7 +239,7 @@ def create_app(config_name='default'):
             flash('Candidature mise à jour avec succès!', 'success')
             return redirect(url_for('voir_candidature', id=id))
         
-        return render_template('admin_candidature_detail.html', 
+        return render_template('admin/candidature_detail.html', 
                              candidature=candidature)
     
     @app.route('/admin/download/<int:id>/<string:document>')
@@ -320,32 +248,24 @@ def create_app(config_name='default'):
         """Télécharger un document spécifique"""
         candidature = Candidature.query.get_or_404(id)
         
-        if document == 'cv' and candidature.cv_path:
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], candidature.cv_path)
-            if os.path.exists(filepath):
-                return send_file(
-                    filepath,
-                    as_attachment=True,
-                    download_name=f"CV_{candidature.nom_complet}_{id}.{candidature.cv_path.split('.')[-1]}"
-                )
+        file_info = {
+            'cv': (candidature.cv_path, f"CV_{candidature.nom_complet}_{id}"),
+            'lettre_motivation': (candidature.lettre_motivation_path, f"Lettre_{candidature.nom_complet}_{id}"),
+            'portfolio': (candidature.portfolio_fichier_path, f"Portfolio_{candidature.nom_complet}_{id}")
+        }
         
-        elif document == 'lettre_motivation' and candidature.lettre_motivation_path:
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], candidature.lettre_motivation_path)
-            if os.path.exists(filepath):
-                return send_file(
-                    filepath,
-                    as_attachment=True,
-                    download_name=f"Lettre_{candidature.nom_complet}_{id}.{candidature.lettre_motivation_path.split('.')[-1]}"
-                )
-        
-        elif document == 'portfolio' and candidature.portfolio_fichier_path:
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], candidature.portfolio_fichier_path)
-            if os.path.exists(filepath):
-                return send_file(
-                    filepath,
-                    as_attachment=True,
-                    download_name=f"Portfolio_{candidature.nom_complet}_{id}.{candidature.portfolio_fichier_path.split('.')[-1]}"
-                )
+        if document in file_info:
+            file_path, base_name = file_info[document]
+            if file_path:
+                full_path = os.path.join(app.config['UPLOAD_FOLDER'], file_path)
+                if os.path.exists(full_path):
+                    extension = file_path.split('.')[-1] if '.' in file_path else ''
+                    download_name = f"{base_name}.{extension}" if extension else base_name
+                    return send_file(
+                        full_path,
+                        as_attachment=True,
+                        download_name=download_name
+                    )
         
         flash('Document non trouvé', 'error')
         return redirect(url_for('voir_candidature', id=id))
@@ -423,7 +343,7 @@ def create_app(config_name='default'):
         stats_mois = db.session.query(
             db.func.strftime('%Y-%m', Candidature.date_soumission),
             db.func.count(Candidature.id)
-        ).group_by(db.func.strftime('%Y-%m', Candidature.date_soumission)).all()
+        ).filter(Candidature.date_soumission.isnot(None)).group_by(db.func.strftime('%Y-%m', Candidature.date_soumission)).all()
         
         # Top villes
         top_villes = db.session.query(
@@ -433,10 +353,176 @@ def create_app(config_name='default'):
             db.func.count(Candidature.id).desc()
         ).limit(10).all()
         
-        return render_template('admin_statistiques.html',
+        return render_template('admin/statistiques.html',
                              stats_statut=stats_statut,
                              stats_mois=stats_mois,
                              top_villes=top_villes)
+    
+    # Route pour la page d'accueil
+    @app.route('/home')
+    @app.route('/')
+    def home():
+        """Page d'accueil avec navigation"""
+        date_limite = app.config['DATE_LIMITE']
+        aujourdhui = datetime.now().date()
+        accepte_candidatures = aujourdhui <= date_limite
+        
+        return render_template('home.html', 
+                             accepte_candidatures=accepte_candidatures,
+                             date_limite=date_limite,
+                             email_contact=app.config.get('EMAIL_CONTACT', 'contact@example.com'),
+                             email_support=app.config.get('EMAIL_SUPPORT', 'support@example.com'))
+    
+    # Route pour le formulaire (séparée de l'accueil)
+    @app.route('/formulaire')
+    def formulaire():
+        """Page du formulaire de candidature"""
+        date_limite = app.config['DATE_LIMITE']
+        aujourdhui = datetime.now().date()
+        accepte_candidatures = aujourdhui <= date_limite
+        
+        if not accepte_candidatures:
+            flash('La période de candidature est terminée.', 'warning')
+            return redirect(url_for('home'))
+        
+        return render_template('index.html', 
+                             accepte_candidatures=accepte_candidatures,
+                             date_limite=date_limite)
+    
+    # Route de contact
+    @app.route('/contact')
+    def contact():
+        """Page de contact"""
+        return render_template('contact.html', 
+                             email_contact=app.config.get('EMAIL_CONTACT', 'contact@example.com'),
+                             email_support=app.config.get('EMAIL_SUPPORT', 'support@example.com'))
+    
+    # Routes publiques (candidats)
+    @app.route('/postuler', methods=['POST'])
+    def postuler():
+        """Soumettre une candidature"""
+        # Vérifier la date limite
+        aujourdhui = datetime.now().date()
+        if aujourdhui > app.config['DATE_LIMITE']:
+            return jsonify({
+                'success': False, 
+                'error': 'La période de candidature est terminée.'
+            }), 400
+        
+        try:
+            # Log pour déboguer
+            logger.info(f"Form data received")
+            logger.info(f"Files received: {list(request.files.keys())}")
+            
+            # Récupérer les données du formulaire
+            candidature = Candidature()
+            
+            # Informations personnelles
+            candidature.nom_complet = request.form.get('nom_complet', '').strip()
+            candidature.email = request.form.get('email', '').strip()
+            candidature.telephone = request.form.get('telephone', '').strip()
+            candidature.ville = request.form.get('ville', '').strip()
+            candidature.portfolio_lien = request.form.get('portfolio_lien', '').strip()
+            candidature.lettre_motivation_text = request.form.get('motivation', '').strip()
+            candidature.competences_marketing = request.form.get('competences', '').strip()
+            
+            logger.info(f"Nom: {candidature.nom_complet}, Email: {candidature.email}")
+            
+            # Validation
+            if not candidature.nom_complet:
+                return jsonify({'success': False, 'error': 'Le nom complet est obligatoire'}), 400
+            
+            if not candidature.email:
+                return jsonify({'success': False, 'error': 'L\'email est obligatoire'}), 400
+            
+            # Traiter les fichiers avec plus de logging
+            file_status = {}
+            
+            # CV
+            if 'cv' in request.files:
+                file = request.files['cv']
+                if file and file.filename:
+                    logger.info(f"CV file received: {file.filename}, size: {file.content_length}")
+                    if allowed_file(file.filename):
+                        filename = save_file(file, candidature.nom_complet, 'cv')
+                        if filename:
+                            candidature.cv_path = filename
+                            file_status['cv'] = f"CV uploadé: {file.filename}"
+                        else:
+                            file_status['cv'] = "Erreur lors de l'upload du CV"
+                    else:
+                        file_status['cv'] = f"Extension non autorisée pour le CV: {file.filename}"
+            
+            # Lettre de motivation
+            if 'lettre_motivation' in request.files:
+                file = request.files['lettre_motivation']
+                if file and file.filename:
+                    logger.info(f"Lettre file received: {file.filename}")
+                    if allowed_file(file.filename):
+                        filename = save_file(file, candidature.nom_complet, 'lettre_motivation')
+                        if filename:
+                            candidature.lettre_motivation_path = filename
+                            file_status['lettre'] = f"Lettre uploadée: {file.filename}"
+                    else:
+                        file_status['lettre'] = f"Extension non autorisée pour la lettre: {file.filename}"
+            
+            # Portfolio fichier
+            if 'portfolio_fichier' in request.files:
+                file = request.files['portfolio_fichier']
+                if file and file.filename:
+                    logger.info(f"Portfolio file received: {file.filename}")
+                    if allowed_file(file.filename):
+                        filename = save_file(file, candidature.nom_complet, 'portfolio')
+                        if filename:
+                            candidature.portfolio_fichier_path = filename
+                            file_status['portfolio'] = f"Portfolio uploadé: {file.filename}"
+                    else:
+                        file_status['portfolio'] = f"Extension non autorisée pour le portfolio: {file.filename}"
+            
+            logger.info(f"File upload status: {file_status}")
+            
+            # Sauvegarder en base de données
+            db.session.add(candidature)
+            db.session.commit()
+            
+            logger.info(f"Candidature {candidature.id} sauvegardée avec succès")
+            
+            # Préparer le message de succès avec détails des fichiers
+            message = 'Candidature soumise avec succès !'
+            if file_status:
+                message += "\nFichiers uploadés:\n"
+                for doc, status in file_status.items():
+                    message += f"- {status}\n"
+            
+            # Envoyer l'email de confirmation
+            try:
+                send_confirmation_email(candidature, app)
+            except Exception as e:
+                logger.error(f"Erreur lors de l'envoi de l'email de confirmation: {str(e)}")
+            
+            # Envoyer la notification à l'admin
+            try:
+                send_admin_notification(candidature, app)
+            except Exception as e:
+                logger.error(f"Erreur notification admin: {str(e)}")
+            
+            return jsonify({
+                'success': True,
+                'message': message,
+                'id': candidature.id,
+                'nom': candidature.nom_complet,
+                'file_status': file_status
+            })
+            
+        except Exception as e:
+            logger.error(f"Erreur lors de la soumission: {str(e)}", exc_info=True)
+            db.session.rollback()
+            return jsonify({'success': False, 'error': f'Une erreur est survenue: {str(e)}'}), 500
+    
+    @app.route('/confirmation')
+    def confirmation():
+        """Page de confirmation après soumission"""
+        return render_template('confirmation.html')
     
     # Route publique pour la santé
     @app.route('/health')
@@ -451,12 +537,36 @@ def create_app(config_name='default'):
     # Gestion des erreurs
     @app.errorhandler(404)
     def page_not_found(e):
-        return render_template('404.html'), 404
+        return render_template('errors/404.html'), 404
     
     @app.errorhandler(500)
     def internal_server_error(e):
         logger.error(f"Erreur 500: {str(e)}")
-        return render_template('500.html'), 500
+        return render_template('errors/500.html'), 500
+    
+    # Test route pour l'upload
+    @app.route('/test-upload', methods=['GET', 'POST'])
+    def test_upload():
+        """Route de test pour l'upload"""
+        if request.method == 'POST':
+            file = request.files.get('test_file')
+            if file:
+                filename = secure_filename(file.filename)
+                # Créer le dossier uploads s'il n'existe pas
+                os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], f'test_{filename}')
+                file.save(filepath)
+                size = os.path.getsize(filepath)
+                return f'Fichier {filename} reçu ({size} bytes) - Sauvegardé à: {filepath}'
+        
+        return '''
+        <h1>Test d'Upload</h1>
+        <form method="POST" enctype="multipart/form-data">
+            <input type="file" name="test_file">
+            <button type="submit">Tester l'Upload</button>
+        </form>
+        <p>Extensions autorisées: ''' + ', '.join(app.config['ALLOWED_EXTENSIONS']) + '''</p>
+        '''
     
     return app
 
@@ -484,8 +594,8 @@ def send_confirmation_email(candidature, app):
         Date limite de candidature: {app.config['DATE_LIMITE'].strftime('%d/%m/%Y')}
         
         Pour toute question, contactez-nous à:
-        - Email: {app.config['EMAIL_CONTACT']}
-        - Support: {app.config['EMAIL_SUPPORT']}
+        - Email: {app.config.get('EMAIL_CONTACT', 'contact@example.com')}
+        - Support: {app.config.get('EMAIL_SUPPORT', 'support@example.com')}
         
         Cordialement,
         L'équipe de recrutement SCSM SARL
@@ -501,9 +611,14 @@ def send_confirmation_email(candidature, app):
 def send_admin_notification(candidature, app):
     """Notifier l'admin de la nouvelle candidature"""
     try:
+        admin_email = app.config.get('EMAIL_CONTACT')
+        if not admin_email:
+            logger.warning("EMAIL_CONTACT non configuré, notification admin ignorée")
+            return
+        
         msg = Message(
             subject=f"[SCSM] Nouvelle candidature: {candidature.nom_complet}",
-            recipients=[app.config['EMAIL_CONTACT']],
+            recipients=[admin_email],
             sender=app.config['MAIL_DEFAULT_SENDER']
         )
         
@@ -527,21 +642,7 @@ def send_admin_notification(candidature, app):
         logger.error(f"Erreur notification admin: {str(e)}")
 
 
-# Script pour générer un hash de mot de passe admin
-def create_admin_password():
-    """Utilitaire pour créer un hash de mot de passe"""
-    from werkzeug.security import generate_password_hash
-    password = input("Entrez le mot de passe admin: ")
-    print(f"HASH généré: {generate_password_hash(password)}")
-
-
 if __name__ == '__main__':
     app = create_app()
-    
-    # Pour générer un hash de mot de passe
-    # if len(sys.argv) > 1 and sys.argv[1] == 'create-password':
-    #     create_admin_password()
-    # else:
-    
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=True, host='0.0.0.0', port=port)
