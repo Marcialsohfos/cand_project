@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Candidature #{{ candidature.id }} - Admin SCSM SARL</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #667eea;
+            --secondary-color: #764ba2;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+        }
+        
+        .sidebar {
+            background: linear-gradient(180deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            min-height: 100vh;
+            position: fixed;
+            width: 250px;
+            padding-top: 20px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+        
+        .main-content {
+            margin-left: 250px;
+            padding: 20px;
+        }
+        
+        .candidature-header {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        }
+        
+        .info-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        }
+        
+        .documents-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        }
+        
+        .sidebar-brand {
+            padding: 0 20px 30px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .sidebar-item {
+            padding: 12px 20px;
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            display: block;
+            border-radius: 10px;
+            margin: 5px 15px;
+            transition: all 0.3s;
+        }
+        
+        .sidebar-item:hover, .sidebar-item.active {
+            background: rgba(255,255,255,0.1);
+            color: white;
+            text-decoration: none;
+        }
+        
+        .sidebar-item i {
+            width: 25px;
+            margin-right: 10px;
+            text-align: center;
+        }
+        
+        .status-badge {
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        
+        .status-nouvelle { background: #d4edda; color: #155724; }
+        .status-en-revue { background: #fff3cd; color: #856404; }
+        .status-contacte { background: #cce5ff; color: #004085; }
+        .status-rejete { background: #f8d7da; color: #721c24; }
+        
+        .btn-action {
+            padding: 8px 15px;
+            border-radius: 10px;
+            font-weight: 600;
+            margin: 0 5px 5px 0;
+        }
+        
+        .document-item {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-left: 4px solid var(--primary-color);
+        }
+        
+        .candidat-avatar {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin: 0 auto 20px;
+        }
+        
+        .info-row {
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .info-row:last-child {
+            border-bottom: none;
+        }
+        
+        .text-content {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .timeline {
+            position: relative;
+            padding-left: 30px;
+        }
+        
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 15px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: var(--primary-color);
+        }
+        
+        .timeline-item {
+            position: relative;
+            margin-bottom: 20px;
+        }
+        
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -23px;
+            top: 5px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--primary-color);
+            border: 3px solid white;
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 100%;
+                position: relative;
+                min-height: auto;
+            }
+            .main-content {
+                margin-left: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar d-none d-md-block">
+        <div class="sidebar-brand">
+            <h3><i class="fas fa-briefcase"></i> SCSM SARL</h3>
+            <p class="mb-0">Administration</p>
+        </div>
+        
+        <nav class="sidebar-nav">
+            <a href="{{ url_for('admin_dashboard') }}" class="sidebar-item">
+                <i class="fas fa-tachometer-alt"></i> Tableau de bord
+            </a>
+            <a href="{{ url_for('liste_candidatures') }}" class="sidebar-item">
+                <i class="fas fa-users"></i> Candidatures
+            </a>
+            <a href="{{ url_for('voir_candidature', id=candidature.id) }}" class="sidebar-item active">
+                <i class="fas fa-user"></i> Détail candidature
+            </a>
+            <a href="{{ url_for('statistiques') }}" class="sidebar-item">
+                <i class="fas fa-chart-bar"></i> Statistiques
+            </a>
+            <a href="{{ url_for('home') }}" class="sidebar-item">
+                <i class="fas fa-external-link-alt"></i> Site public
+            </a>
+            <div class="sidebar-item mt-4">
+                <i class="fas fa-user"></i> Connecté en tant que <strong>Admin</strong>
+            </div>
+            <a href="{{ url_for('admin_logout') }}" class="sidebar-item text-danger">
+                <i class="fas fa-sign-out-alt"></i> Déconnexion
+            </a>
+        </nav>
+    </div>
+    
+    <!-- Navigation mobile -->
+    <nav class="navbar navbar-expand-md d-md-none bg-white shadow-sm mb-4">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-briefcase"></i> Détail Candidature
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mobileNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="mobileNav">
+                <div class="navbar-nav">
+                    <a class="nav-link" href="{{ url_for('admin_dashboard') }}">
+                        <i class="fas fa-tachometer-alt"></i> Dashboard
+                    </a>
+                    <a class="nav-link" href="{{ url_for('liste_candidatures') }}">
+                        <i class="fas fa-users"></i> Candidatures
+                    </a>
+                    <a class="nav-link active" href="{{ url_for('voir_candidature', id=candidature.id) }}">
+                        <i class="fas fa-user"></i> Détail
+                    </a>
+                    <a class="nav-link" href="{{ url_for('statistiques') }}">
+                        <i class="fas fa-chart-bar"></i> Statistiques
+                    </a>
+                    <a class="nav-link" href="{{ url_for('home') }}">
+                        <i class="fas fa-external-link-alt"></i> Site public
+                    </a>
+                    <a class="nav-link text-danger" href="{{ url_for('admin_logout') }}">
+                        <i class="fas fa-sign-out-alt"></i> Déconnexion
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Contenu principal -->
+    <div class="main-content">
+        <!-- En-tête -->
+        <div class="candidature-header">
+            <div class="row align-items-center">
+                <div class="col-md-2 text-center">
+                    <div class="candidat-avatar">
+                        {{ candidature.nom_complet[0]|upper }}
+                    </div>
+                </div>
+                <div class="col-md-8">
+                    <h1 class="h3 mb-2">{{ candidature.nom_complet }}</h1>
+                    <p class="text-muted mb-1">
+                        <i class="fas fa-envelope"></i> {{ candidature.email }}
+                        {% if candidature.telephone %}
+                        | <i class="fas fa-phone"></i> {{ candidature.telephone }}
+                        {% endif %}
+                    </p>
+                    <p class="mb-0">
+                        <i class="fas fa-map-marker-alt"></i> {{ candidature.ville or 'Ville non précisée' }}
+                        | <i class="fas fa-calendar"></i> 
+                        Soumis le {{ candidature.date_soumission.strftime('%d/%m/%Y à %H:%M') }}
+                    </p>
+                </div>
+                <div class="col-md-2 text-end">
+                    <span class="status-badge status-{{ candidature.statut.lower().replace(' ', '-').replace('é', 'e') }} mb-2 d-inline-block">
+                        {{ candidature.statut }}
+                    </span>
+                    <br>
+                    <small class="text-muted">ID: #{{ candidature.id }}</small>
+                </div>
+            </div>
+            
+            <!-- Boutons d'action -->
+            <div class="row mt-4">
+                <div class="col-12">
+                    <div class="d-flex flex-wrap">
+                        <a href="{{ url_for('liste_candidatures') }}" class="btn btn-action btn-outline-secondary">
+                            <i class="fas fa-arrow-left"></i> Retour à la liste
+                        </a>
+                        <a href="{{ url_for('download_all_documents', id=candidature.id) }}" 
+                           class="btn btn-action btn-success">
+                            <i class="fas fa-download"></i> Télécharger tout (ZIP)
+                        </a>
+                        <button class="btn btn-action btn-warning" data-bs-toggle="modal" data-bs-target="#statusModal">
+                            <i class="fas fa-edit"></i> Changer statut
+                        </button>
+                        <a href="mailto:{{ candidature.email }}?subject=SCSM SARL - Votre candidature #{{ candidature.id }}&body=Bonjour {{ candidature.nom_complet }},%0D%0A%0D%0A"
+                           class="btn btn-action btn-primary">
+                            <i class="fas fa-envelope"></i> Contacter
+                        </a>
+                        <button class="btn btn-action btn-danger" onclick="confirmDelete()">
+                            <i class="fas fa-trash"></i> Supprimer
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Messages flash -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }} alert-dismissible fade show">
+                        <i class="fas fa-{{ 'exclamation-triangle' if category == 'error' else 'check-circle' }}"></i>
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="row">
+            <!-- Informations personnelles -->
+            <div class="col-lg-4">
+                <div class="info-card">
+                    <h4 class="mb-4">
+                        <i class="fas fa-user-circle"></i> Informations personnelles
+                    </h4>
+                    
+                    <div class="info-row">
+                        <strong><i class="fas fa-id-card"></i> Nom complet</strong>
+                        <p class="mb-0">{{ candidature.nom_complet }}</p>
+                    </div>
+                    
+                    <div class="info-row">
+                        <strong><i class="fas fa-envelope"></i> Email</strong>
+                        <p class="mb-0">
+                            <a href="mailto:{{ candidature.email }}">{{ candidature.email }}</a>
+                        </p>
+                    </div>
+                    
+                    {% if candidature.telephone %}
+                    <div class="info-row">
+                        <strong><i class="fas fa-phone"></i> Téléphone</strong>
+                        <p class="mb-0">{{ candidature.telephone }}</p>
+                    </div>
+                    {% endif %}
+                    
+                    <div class="info-row">
+                        <strong><i class="fas fa-map-marker-alt"></i> Ville</strong>
+                        <p class="mb-0">{{ candidature.ville or 'Non précisée' }}</p>
+                    </div>
+                    
+                    {% if candidature.portfolio_lien %}
+                    <div class="info-row">
+                        <strong><i class="fas fa-link"></i> Portfolio (lien)</strong>
+                        <p class="mb-0">
+                            <a href="{{ candidature.portfolio_lien }}" target="_blank">
+                                {{ candidature.portfolio_lien|truncate(30) }}
+                            </a>
+                        </p>
+                    </div>
+                    {% endif %}
+                    
+                    <div class="info-row">
+                        <strong><i class="fas fa-calendar"></i> Date de soumission</strong>
+                        <p class="mb-0">{{ candidature.date_soumission.strftime('%d/%m/%Y à %H:%M') }}</p>
+                        <small class="text-muted">
+                            Il y a {{ ((now - candidature.date_soumission).days) }} jours
+                        </small>
+                    </div>
+                </div>
+                
+                <!-- Documents -->
+                <div class="documents-card">
+                    <h4 class="mb-4">
+                        <i class="fas fa-paperclip"></i> Documents
+                    </h4>
+                    
+                    {% if candidature.cv_path %}
+                    <div class="document-item">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="mb-1">
+                                    <i class="fas fa-file-contract"></i> Curriculum Vitae
+                                </h6>
+                                <small class="text-muted">Format: {{ candidature.cv_path.split('.')[-1].upper() }}</small>
+                            </div>
+                            <div>
+                                <a href="{{ url_for('download_document', id=candidature.id, document='cv') }}" 
+                                   class="btn btn-sm btn-outline-success">
+                                    <i class="fas fa-download"></i>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle"></i> CV non fourni
+                    </div>
+                    {% endif %}
+                    
+                    {% if candidature.lettre_motivation_path %}
+                    <div class="document-item">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="mb-1">
+                                    <i class="fas fa-envelope-open-text"></i> Lettre de motivation
+                                </h6>
+                                <small class="text-muted">Format: {{ candidature.lettre_motivation_path.split('.')[-1].upper() }}</small>
+                            </div>
+                            <div>
+                                <a href="{{ url_for('download_document', id=candidature.id, document='lettre_motivation') }}" 
+                                   class="btn btn-sm btn-outline-success">
+                                    <i class="fas fa-download"></i>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle"></i> Lettre de motivation non fournie
+                    </div>
+                    {% endif %}
+                    
+                    {% if candidature.portfolio_fichier_path %}
+                    <div class="document-item">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="mb-1">
+                                    <i class="fas fa-briefcase"></i> Portfolio (fichier)
+                                </h6>
+                                <small class="text-muted">Format: {{ candidature.portfolio_fichier_path.split('.')[-1].upper() }}</small>
+                            </div>
+                            <div>
+                                <a href="{{ url_for('download_document', id=candidature.id, document='portfolio') }}" 
+                                   class="btn btn-sm btn-outline-success">
+                                    <i class="fas fa-download"></i>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                    
+                    <div class="mt-3">
+                        <a href="{{ url_for('download_all_documents', id=candidature.id) }}" 
+                           class="btn btn-success w-100">
+                            <i class="fas fa-download"></i> Télécharger tous les documents
+                        </a>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Contenu de la candidature -->
+            <div class="col-lg-8">
+                <div class="info-card">
+                    <h4 class="mb-4">
+                        <i class="fas fa-envelope-open-text"></i> Lettre de motivation
+                    </h4>
+                    
+                    {% if candidature.lettre_motivation_text %}
+                    <div class="text-content">
+                        {{ candidature.lettre_motivation_text|nl2br|safe }}
+                    </div>
+                    {% else %}
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i> 
+                        Aucun texte de lettre de motivation n'a été fourni (seulement un fichier peut-être).
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <div class="info-card">
+                    <h4 class="mb-4">
+                        <i class="fas fa-chart-line"></i> Compétences en marketing digital
+                    </h4>
+                    
+                    {% if candidature.competences_marketing %}
+                    <div class="text-content">
+                        {{ candidature.competences_marketing|nl2br|safe }}
+                    </div>
+                    {% else %}
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i> 
+                        Aucune compétence en marketing digital n'a été spécifiée.
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <!-- Notes admin et suivi -->
+                <div class="info-card">
+                    <h4 class="mb-4">
+                        <i class="fas fa-clipboard-check"></i> Notes et suivi
+                    </h4>
+                    
+                    <form method="POST" action="{{ url_for('voir_candidature', id=candidature.id) }}">
+                        <div class="mb-3">
+                            <label for="statut" class="form-label">Statut actuel</label>
+                            <select class="form-select" id="statut" name="statut">
+                                <option value="Nouvelle" {% if candidature.statut == 'Nouvelle' %}selected{% endif %}>Nouvelle</option>
+                                <option value="En revue" {% if candidature.statut == 'En revue' %}selected{% endif %}>En revue</option>
+                                <option value="Contacté" {% if candidature.statut == 'Contacté' %}selected{% endif %}>Contacté</option>
+                                <option value="Rejeté" {% if candidature.statut == 'Rejeté' %}selected{% endif %}>Rejeté</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="notes_admin" class="form-label">Notes internes</label>
+                            <textarea class="form-control" id="notes_admin" name="notes_admin" 
+                                      rows="6" placeholder="Ajoutez des notes internes sur ce candidat...">{{ candidature.notes_admin or '' }}</textarea>
+                            <div class="form-text">
+                                Ces notes sont visibles uniquement par les administrateurs.
+                            </div>
+                        </div>
+                        
+                        <div class="d-flex justify-content-between">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save"></i> Enregistrer les modifications
+                            </button>
+                            <a href="{{ url_for('liste_candidatures') }}" class="btn btn-outline-secondary">
+                                <i class="fas fa-times"></i> Annuler
+                            </a>
+                        </div>
+                    </form>
+                </div>
+                
+                <!-- Timeline d'activité -->
+                <div class="info-card">
+                    <h4 class="mb-4">
+                        <i class="fas fa-history"></i> Historique d'activité
+                    </h4>
+                    
+                    <div class="timeline">
+                        <div class="timeline-item">
+                            <h6>Soumission de la candidature</h6>
+                            <p class="text-muted mb-1">{{ candidature.date_soumission.strftime('%d/%m/%Y à %H:%M') }}</p>
+                            <p class="mb-0">Le candidat a soumis sa candidature via le formulaire en ligne.</p>
+                        </div>
+                        
+                        <div class="timeline-item">
+                            <h6>Email de confirmation envoyé</h6>
+                            <p class="text-muted mb-1">{{ candidature.date_soumission.strftime('%d/%m/%Y à %H:%M') }}</p>
+                            <p class="mb-0">Un email de confirmation a été envoyé au candidat.</p>
+                        </div>
+                        
+                        <div class="timeline-item">
+                            <h6>Statut actuel: {{ candidature.statut }}</h6>
+                            <p class="text-muted mb-1">Mis à jour par l'administrateur</p>
+                            <p class="mb-0">
+                                {% if candidature.notes_admin %}
+                                Notes: {{ candidature.notes_admin }}
+                                {% else %}
+                                Aucune note supplémentaire.
+                                {% endif %}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Pied de page -->
+        <footer class="mt-5 pt-4 border-top text-muted text-center">
+            <p class="mb-1">
+                &copy; 2024 SCSM SARL - Détail candidature #{{ candidature.id }}
+            </p>
+            <p class="mb-0">
+                <i class="fas fa-shield-alt"></i> Informations confidentielles | 
+                <i class="fas fa-eye"></i> Vu par: Admin | 
+                <i class="fas fa-clock"></i> Dernière modification: <span id="lastUpdate">Maintenant</span>
+            </p>
+        </footer>
+    </div>
+
+    <!-- Modal pour changer le statut -->
+    <div class="modal fade" id="statusModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Changer le statut</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="statusForm">
+                        <div class="mb-3">
+                            <label for="newStatus" class="form-label">Nouveau statut</label>
+                            <select class="form-select" id="newStatus">
+                                <option value="Nouvelle">Nouvelle</option>
+                                <option value="En revue">En revue</option>
+                                <option value="Contacté">Contacté</option>
+                                <option value="Rejeté">Rejeté</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="statusNotes" class="form-label">Notes (optionnel)</label>
+                            <textarea class="form-control" id="statusNotes" rows="3"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                    <button type="button" class="btn btn-primary" onclick="updateStatus()">
+                        <i class="fas fa-save"></i> Enregistrer
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Mettre à jour la dernière mise à jour
+            const now = new Date();
+            const options = { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                second: '2-digit'
+            };
+            document.getElementById('lastUpdate').textContent = now.toLocaleTimeString('fr-FR', options);
+            
+            // Définir le statut actuel dans le modal
+            const currentStatus = '{{ candidature.statut }}';
+            document.getElementById('newStatus').value = currentStatus;
+            
+            // Confirmer la suppression
+            window.confirmDelete = function() {
+                if (confirm('Êtes-vous sûr de vouloir supprimer cette candidature ? Cette action est irréversible.')) {
+                    // Ici, vous devriez faire un appel AJAX pour supprimer la candidature
+                    // Pour l'instant, on redirige vers la liste
+                    alert('Fonctionnalité de suppression à implémenter.');
+                    // window.location.href = '/admin/candidatures/delete/{{ candidature.id }}';
+                }
+            };
+            
+            // Mettre à jour le statut via le modal
+            window.updateStatus = function() {
+                const newStatus = document.getElementById('newStatus').value;
+                const notes = document.getElementById('statusNotes').value;
+                
+                // Mettre à jour le formulaire principal
+                document.getElementById('statut').value = newStatus;
+                if (notes) {
+                    document.getElementById('notes_admin').value = 
+                        (document.getElementById('notes_admin').value ? 
+                         document.getElementById('notes_admin').value + '\n\n' : '') + 
+                        `[Changement de statut: ${newStatus}] ${notes}`;
+                }
+                
+                // Soumettre le formulaire
+                document.querySelector('form').submit();
+            };
+            
+            // Mettre en évidence les champs vides
+            const emptyFields = [];
+            if (!'{{ candidature.telephone }}'.trim()) emptyFields.push('téléphone');
+            if (!'{{ candidature.portfolio_lien }}'.trim()) emptyFields.push('portfolio en ligne');
+            if (!'{{ candidature.competences_marketing }}'.trim()) emptyFields.push('compétences marketing');
+            
+            if (emptyFields.length > 0) {
+                const alertDiv = document.createElement('div');
+                alertDiv.className = 'alert alert-warning mt-3';
+                alertDiv.innerHTML = `
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>Informations manquantes:</strong> 
+                    ${emptyFields.join(', ')}.
+                `;
+                document.querySelector('.candidature-header').appendChild(alertDiv);
+            }
+            
+            // Auto-sauvegarde des notes
+            const notesTextarea = document.getElementById('notes_admin');
+            if (notesTextarea) {
+                let saveTimeout;
+                notesTextarea.addEventListener('input', function() {
+                    clearTimeout(saveTimeout);
+                    saveTimeout = setTimeout(function() {
+                        // Ici, vous pourriez faire un appel AJAX pour sauvegarder automatiquement
+                        console.log('Notes modifiées, auto-sauvegarde...');
+                    }, 2000);
+                });
+            }
+            
+            // Calcul de l'âge de la candidature
+            const submissionDate = new Date('{{ candidature.date_soumission.isoformat() }}');
+            const ageInDays = Math.floor((new Date() - submissionDate) / (1000 * 60 * 60 * 24));
+            
+            if (ageInDays > 7 && '{{ candidature.statut }}' === 'Nouvelle') {
+                const alertDiv = document.createElement('div');
+                alertDiv.className = 'alert alert-danger mt-3';
+                alertDiv.innerHTML = `
+                    <i class="fas fa-clock"></i>
+                    <strong>Candidature ancienne:</strong> 
+                    Cette candidature est en attente depuis ${ageInDays} jours. 
+                    Veuillez l'examiner rapidement.
+                `;
+                document.querySelector('.candidature-header').appendChild(alertDiv);
+            }
+        });
+        
+        // Fonction nl2br pour l'affichage du texte
+        function nl2br(str) {
+            return str.replace(/\n/g, '<br>');
+        }
+    </script>
+</body>
+</html>

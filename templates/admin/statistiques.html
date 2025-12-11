@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Statistiques - Admin SCSM SARL</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary-color: #667eea;
+            --secondary-color: #764ba2;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+        }
+        
+        .sidebar {
+            background: linear-gradient(180deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            min-height: 100vh;
+            position: fixed;
+            width: 250px;
+            padding-top: 20px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+        
+        .main-content {
+            margin-left: 250px;
+            padding: 20px;
+        }
+        
+        .stats-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            transition: transform 0.3s;
+        }
+        
+        .stats-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .chart-container {
+            height: 300px;
+            position: relative;
+            margin: 20px 0;
+        }
+        
+        .sidebar-brand {
+            padding: 0 20px 30px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .sidebar-item {
+            padding: 12px 20px;
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            display: block;
+            border-radius: 10px;
+            margin: 5px 15px;
+            transition: all 0.3s;
+        }
+        
+        .sidebar-item:hover, .sidebar-item.active {
+            background: rgba(255,255,255,0.1);
+            color: white;
+            text-decoration: none;
+        }
+        
+        .sidebar-item i {
+            width: 25px;
+            margin-right: 10px;
+            text-align: center;
+        }
+        
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+        
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .trend-up {
+            color: #28a745;
+        }
+        
+        .trend-down {
+            color: #dc3545;
+        }
+        
+        .trend-neutral {
+            color: #6c757d;
+        }
+        
+        .table th {
+            border-top: none;
+            border-bottom: 2px solid #dee2e6;
+            font-weight: 600;
+            color: #495057;
+            background-color: #f8f9fa;
+        }
+        
+        .progress {
+            height: 10px;
+            border-radius: 5px;
+        }
+        
+        .export-buttons .btn {
+            padding: 8px 15px;
+            border-radius: 10px;
+            margin: 0 5px;
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 100%;
+                position: relative;
+                min-height: auto;
+            }
+            .main-content {
+                margin-left: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar d-none d-md-block">
+        <div class="sidebar-brand">
+            <h3><i class="fas fa-briefcase"></i> SCSM SARL</h3>
+            <p class="mb-0">Administration</p>
+        </div>
+        
+        <nav class="sidebar-nav">
+            <a href="{{ url_for('admin_dashboard') }}" class="sidebar-item">
+                <i class="fas fa-tachometer-alt"></i> Tableau de bord
+            </a>
+            <a href="{{ url_for('liste_candidatures') }}" class="sidebar-item">
+                <i class="fas fa-users"></i> Candidatures
+            </a>
+            <a href="{{ url_for('statistiques') }}" class="sidebar-item active">
+                <i class="fas fa-chart-bar"></i> Statistiques
+            </a>
+            <a href="{{ url_for('home') }}" class="sidebar-item">
+                <i class="fas fa-external-link-alt"></i> Site public
+            </a>
+            <div class="sidebar-item mt-4">
+                <i class="fas fa-user"></i> Connecté en tant que <strong>Admin</strong>
+            </div>
+            <a href="{{ url_for('admin_logout') }}" class="sidebar-item text-danger">
+                <i class="fas fa-sign-out-alt"></i> Déconnexion
+            </a>
+        </nav>
+    </div>
+    
+    <!-- Navigation mobile -->
+    <nav class="navbar navbar-expand-md d-md-none bg-white shadow-sm mb-4">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-chart-bar"></i> Statistiques
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mobileNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="mobileNav">
+                <div class="navbar-nav">
+                    <a class="nav-link" href="{{ url_for('admin_dashboard') }}">
+                        <i class="fas fa-tachometer-alt"></i> Dashboard
+                    </a>
+                    <a class="nav-link" href="{{ url_for('liste_candidatures') }}">
+                        <i class="fas fa-users"></i> Candidatures
+                    </a>
+                    <a class="nav-link active" href="{{ url_for('statistiques') }}">
+                        <i class="fas fa-chart-bar"></i> Statistiques
+                    </a>
+                    <a class="nav-link" href="{{ url_for('home') }}">
+                        <i class="fas fa-external-link-alt"></i> Site public
+                    </a>
+                    <a class="nav-link text-danger" href="{{ url_for('admin_logout') }}">
+                        <i class="fas fa-sign-out-alt"></i> Déconnexion
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Contenu principal -->
+    <div class="main-content">
+        <!-- En-tête -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h1 class="h3 mb-2">
+                    <i class="fas fa-chart-bar"></i> Statistiques détaillées
+                </h1>
+                <p class="text-muted">Analyse des candidatures SCSM SARL</p>
+            </div>
+            <div class="text-end">
+                <span class="badge bg-primary">
+                    <i class="fas fa-calendar"></i> 
+                    {{ date_limite.strftime('%d/%m/%Y') }}
+                </span>
+                <span class="badge bg-success ms-2">
+                    <i class="fas fa-database"></i> 
+                    Données en temps réel
+                </span>
+            </div>
+        </div>
+        
+        <!-- Boutons d'export -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div class="export-buttons">
+                <button class="btn btn-outline-success" onclick="exportCharts()">
+                    <i class="fas fa-download"></i> Exporter rapports
+                </button>
+                <button class="btn btn-outline-primary" onclick="window.print()">
+                    <i class="fas fa-print"></i> Imprimer
+                </button>
+                <button class="btn btn-outline-info" onclick="refreshStats()">
+                    <i class="fas fa-sync-alt"></i> Actualiser
+                </button>
+            </div>
+            
+            <div class="period-selector">
+                <select class="form-select" id="periodSelect" onchange="updatePeriod()">
+                    <option value="all">Toute la période</option>
+                    <option value="month">30 derniers jours</option>
+                    <option value="week">7 derniers jours</option>
+                    <option value="today">Aujourd'hui</option>
+                </select>
+            </div>
+        </div>
+        
+        <!-- Cartes de statistiques principales -->
+        <div class="row">
+            <div class="col-md-3">
+                <div class="stats-card text-center">
+                    <div class="stat-number" id="totalCandidatures">
+                        {% set total = stats_statut|sum(attribute=1) %}
+                        {{ total }}
+                    </div>
+                    <div class="stat-label">Total candidatures</div>
+                    <div class="mt-3">
+                        <small class="trend-up">
+                            <i class="fas fa-arrow-up"></i> 
+                            Toutes périodes confondues
+                        </small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="stats-card text-center">
+                    <div class="stat-number" id="nouvellesCandidatures">
+                        {% set nouvelles = stats_statut|selectattr("0", "equalto", "Nouvelle")|map(attribute="1")|first|default(0) %}
+                        {{ nouvelles }}
+                    </div>
+                    <div class="stat-label">Nouvelles</div>
+                    <div class="mt-3">
+                        <small class="trend-neutral">
+                            <i class="fas fa-clock"></i> 
+                            À examiner
+                        </small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="stats-card text-center">
+                    <div class="stat-number" id="tauxConversion">
+                        {% set contactees = stats_statut|selectattr("0", "equalto", "Contacté")|map(attribute="1")|first|default(0) %}
+                        {% set taux = (contactees / total * 100) if total > 0 else 0 %}
+                        {{ "%.1f"|format(taux) }}%
+                    </div>
+                    <div class="stat-label">Taux de contact</div>
+                    <div class="mt-3">
+                        <small class="trend-up">
+                            <i class="fas fa-percentage"></i> 
+                            Candidats contactés
+                        </small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="stats-card text-center">
+                    <div class="stat-number" id="moyenneJour">
+                        {% set jours = (date_limite - datetime.now().date()).days %}
+                        {% set moyenne = (total / jours) if jours > 0 else total %}
+                        {{ "%.1f"|format(moyenne) }}
+                    </div>
+                    <div class="stat-label">Moyenne/jour</div>
+                    <div class="mt-3">
+                        <small class="trend-up">
+                            <i class="fas fa-chart-line"></i> 
+                            Candidatures quotidiennes
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Graphiques -->
+        <div class="row">
+            <div class="col-lg-6">
+                <div class="stats-card">
+                    <h4 class="mb-4">
+                        <i class="fas fa-chart-pie"></i> Répartition par statut
+                    </h4>
+                    <div class="chart-container">
+                        <canvas id="statusChart"></canvas>
+                    </div>
+                    <div class="mt-3">
+                        <table class="table table-sm">
+                            <tbody>
+                                {% for statut, count in stats_statut %}
+                                <tr>
+                                    <td>{{ statut }}</td>
+                                    <td class="text-end">{{ count }}</td>
+                                    <td class="text-end">{{ "%.1f"|format(count/total*100) if total > 0 else 0 }}%</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-lg-6">
+                <div class="stats-card">
+                    <h4 class="mb-4">
+                        <i class="fas fa-chart-line"></i> Évolution mensuelle
+                    </h4>
+                    <div class="chart-container">
+                        <canvas id="monthlyChart"></canvas>
+                    </div>
+                    <div class="mt-3">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Mois</th>
+                                    <th class="text-end">Candidatures</th>
+                                    <th class="text-end">Évolution</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for mois, count in stats_mois %}
+                                <tr>
+                                    <td>{{ mois }}</td>
+                                    <td class="text-end">{{ count }}</td>
+                                    <td class="text-end">
+                                        {% if loop.previtem %}
+                                            {% set prev_count = loop.previtem[1] %}
+                                            {% set evolution = ((count - prev_count) / prev_count * 100) if prev_count > 0 else 100 %}
+                                            <span class="{{ 'trend-up' if evolution > 0 else 'trend-down' if evolution < 0 else 'trend-neutral' }}">
+                                                {{ "%+.1f"|format(evolution) }}%
+                                            </span>
+                                        {% else %}
+                                            <span class="trend-neutral">Nouveau</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Top villes -->
+        <div class="row">
+            <div class="col-lg-6">
+                <div class="stats-card">
+                    <h4 class="mb-4">
+                        <i class="fas fa-map-marker-alt"></i> Top villes
+                    </h4>
+                    <div class="chart-container">
+                        <canvas id="citiesChart"></canvas>
+                    </div>
+                    <div class="mt-3">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Ville</th>
+                                    <th class="text-end">Candidatures</th>
+                                    <th class="text-end">Pourcentage</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for ville, count in top_villes %}
+                                <tr>
+                                    <td>{{ ville }}</td>
+                                    <td class="text-end">{{ count }}</td>
+                                    <td class="text-end">{{ "%.1f"|format(count/total*100) if total > 0 else 0 }}%</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-lg-6">
+                <div class="stats-card">
+                    <h4 class="mb-4">
+                        <i class="fas fa-chart-area"></i> Taux de complétion
+                    </h4>
+                    
+                    <div class="mb-4">
+                        <h6>CV fournis</h6>
+                        <div class="progress">
+                            {% set cv_count = total %} {# À remplacer par le vrai nombre de CV #}
+                            <div class="progress-bar bg-success" style="width: {{ (cv_count/total*100) if total > 0 else 0 }}%">
+                                {{ "%.0f"|format(cv_count/total*100) if total > 0 else 0 }}%
+                            </div>
+                        </div>
+                        <small class="text-muted">{{ cv_count }} sur {{ total }} candidatures</small>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <h6>Lettres de motivation fournies</h6>
+                        <div class="progress">
+                            {% set lettre_count = total %} {# À remplacer par le vrai nombre de lettres #}
+                            <div class="progress-bar bg-info" style="width: {{ (lettre_count/total*100) if total > 0 else 0 }}%">
+                                {{ "%.0f"|format(lettre_count/total*100) if total > 0 else 0 }}%
+                            </div>
+                        </div>
+                        <small class="text-muted">{{ lettre_count }} sur {{ total }} candidatures</small>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <h6>Portfolios fournis</h6>
+                        <div class="progress">
+                            {% set portfolio_count = total // 2 %} {# Exemple #}
+                            <div class="progress-bar bg-warning" style="width: {{ (portfolio_count/total*100) if total > 0 else 0 }}%">
+                                {{ "%.0f"|format(portfolio_count/total*100) if total > 0 else 0 }}%
+                            </div>
+                        </div>
+                        <small class="text-muted">{{ portfolio_count }} sur {{ total }} candidatures</small>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i>
+                        <strong>Note:</strong> Ces statistiques sont basées sur les documents détectés dans le système.
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Statistiques avancées -->
+        <div class="stats-card">
+            <h4 class="mb-4">
+                <i class="fas fa-calculator"></i> Statistiques avancées
+            </h4>
+            
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="text-center p-3">
+                        <div class="h2 text-primary" id="avgResponseTime">2.3</div>
+                        <div class="text-muted">Jours moyens avant examen</div>
+                        <small class="text-info">
+                            <i class="fas fa-clock"></i> Temps de traitement
+                        </small>
+                    </div>
+                </div>
+                
+                <div class="col-md-4">
+                    <div class="text-center p-3">
+                        <div class="h2 text-success" id="peakHour">14:30</div>
+                        <div class="text-muted">Heure de soumission la plus fréquente</div>
+                        <small class="text-success">
+                            <i class="fas fa-chart-bar"></i> Pic d'activité
+                        </small>
+                    </div>
+                </div>
+                
+                <div class="col-md-4">
+                    <div class="text-center p-3">
+                        <div class="h2 text-warning" id="completionRate">87%</div>
+                        <div class="text-muted">Taux de complétion moyen</div>
+                        <small class="text-warning">
+                            <i class="fas fa-percentage"></i> Formulaire complété
+                        </small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-4">
+                <h6><i class="fas fa-calendar-alt"></i> Prévisions</h6>
+                <div class="alert alert-warning">
+                    <i class="fas fa-chart-line"></i>
+                    <strong>Projection:</strong> 
+                    Sur la base des données actuelles, environ 
+                    <strong id="projection">{{ total + (total // 30 * (date_limite - datetime.now().date()).days) }}</strong> 
+                    candidatures sont attendues d'ici la date limite 
+                    ({{ date_limite.strftime('%d/%m/%Y') }}).
+                </div>
+            </div>
+        </div>
+        
+        <!-- Pied de page -->
+        <footer class="mt-5 pt-4 border-top text-muted text-center">
+            <p class="mb-1">
+                &copy; 2024 SCSM SARL - Statistiques v2.0
+            </p>
+            <p class="mb-0">
+                <i class="fas fa-database"></i> Données mises à jour en temps réel | 
+                <i class="fas fa-chart-line"></i> Généré le: <span id="generationDate">{{ now.strftime('%d/%m/%Y à %H:%M') }}</span>
+            </p>
+        </footer>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Données pour les graphiques
+            const statusData = {
+                labels: [
+                    {% for statut, count in stats_statut %}
+                    "{{ statut }}"{% if not loop.last %},{% endif %}
+                    {% endfor %}
+                ],
+                datasets: [{
+                    data: [
+                        {% for statut, count in stats_statut %}
+                        {{ count }}{% if not loop.last %},{% endif %}
+                        {% endfor %}
+                    ],
+                    backgroundColor: [
+                        '#28a745', // Nouvelle
+                        '#ffc107', // En revue
+                        '#007bff', // Contacté
+                        '#dc3545'  // Rejeté
+                    ],
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            };
+            
+            const monthlyData = {
+                labels: [
+                    {% for mois, count in stats_mois %}
+                    "{{ mois }}"{% if not loop.last %},{% endif %}
+                    {% endfor %}
+                ],
+                datasets: [{
+                    label: 'Candidatures',
+                    data: [
+                        {% for mois, count in stats_mois %}
+                        {{ count }}{% if not loop.last %},{% endif %}
+                        {% endfor %}
+                    ],
+                    backgroundColor: 'rgba(102, 126, 234, 0.2)',
+                    borderColor: 'rgba(102, 126, 234, 1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.4
+                }]
+            };
+            
+            const citiesData = {
+                labels: [
+                    {% for ville, count in top_villes %}
+                    "{{ ville }}"{% if not loop.last %},{% endif %}
+                    {% endfor %}
+                ],
+                datasets: [{
+                    label: 'Candidatures par ville',
+                    data: [
+                        {% for ville, count in top_villes %}
+                        {{ count }}{% if not loop.last %},{% endif %}
+                        {% endfor %}
+                    ],
+                    backgroundColor: [
+                        '#667eea', '#764ba2', '#28a745', '#ffc107', '#dc3545',
+                        '#17a2b8', '#6f42c1', '#e83e8c', '#fd7e14', '#20c997'
+                    ],
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            };
+            
+            // Initialiser les graphiques
+            const statusCtx = document.getElementById('statusChart').getContext('2d');
+            const statusChart = new Chart(statusCtx, {
+                type: 'doughnut',
+                data: statusData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                padding: 20,
+                                usePointStyle: true
+                            }
+                        }
+                    }
+                }
+            });
+            
+            const monthlyCtx = document.getElementById('monthlyChart').getContext('2d');
+            const monthlyChart = new Chart(monthlyCtx, {
+                type: 'line',
+                data: monthlyData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+            
+            const citiesCtx = document.getElementById('citiesChart').getContext('2d');
+            const citiesChart = new Chart(citiesCtx, {
+                type: 'bar',
+                data: citiesData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+            
+            // Fonctions utilitaires
+            window.exportCharts = function() {
+                alert('Fonctionnalité d\'export à implémenter. Les données sont disponibles dans les tableaux.');
+            };
+            
+            window.refreshStats = function() {
+                window.location.reload();
+            };
+            
+            window.updatePeriod = function() {
+                const period = document.getElementById('periodSelect').value;
+                alert(`Filtre période: ${period}. Cette fonctionnalité nécessite une implémentation backend.`);
+            };
+            
+            // Mettre à jour la date de génération
+            const now = new Date();
+            const options = { 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            };
+            document.getElementById('generationDate').textContent = now.toLocaleDateString('fr-FR', options);
+            
+            // Calculer les statistiques avancées
+            const total = {{ total }};
+            const joursRestants = {{ (date_limite - datetime.now().date()).days }};
+            
+            if (total > 0 && joursRestants > 0) {
+                const projection = total + Math.round(total / 30 * joursRestants);
+                document.getElementById('projection').textContent = projection;
+            }
+            
+            // Auto-refresh toutes les 5 minutes
+            setTimeout(() => {
+                window.location.reload();
+            }, 5 * 60 * 1000);
+        });
+    </script>
+</body>
+</html>

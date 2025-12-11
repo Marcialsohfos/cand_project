@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Candidatures - Admin SCSM SARL</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css">
+    <style>
+        :root {
+            --primary-color: #667eea;
+            --secondary-color: #764ba2;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+        }
+        
+        .sidebar {
+            background: linear-gradient(180deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            min-height: 100vh;
+            position: fixed;
+            width: 250px;
+            padding-top: 20px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+        
+        .main-content {
+            margin-left: 250px;
+            padding: 20px;
+        }
+        
+        .navbar {
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 15px 20px;
+            margin-bottom: 30px;
+            border-radius: 10px;
+        }
+        
+        .filter-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 25px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        }
+        
+        .table-container {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+        
+        .table th {
+            border-top: none;
+            border-bottom: 2px solid #dee2e6;
+            font-weight: 600;
+            color: #495057;
+            background-color: #f8f9fa;
+        }
+        
+        .status-badge {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        
+        .status-nouvelle { background: #d4edda; color: #155724; }
+        .status-en-revue { background: #fff3cd; color: #856404; }
+        .status-contacte { background: #cce5ff; color: #004085; }
+        .status-rejete { background: #f8d7da; color: #721c24; }
+        
+        .sidebar-brand {
+            padding: 0 20px 30px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .sidebar-item {
+            padding: 12px 20px;
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            display: block;
+            border-radius: 10px;
+            margin: 5px 15px;
+            transition: all 0.3s;
+        }
+        
+        .sidebar-item:hover, .sidebar-item.active {
+            background: rgba(255,255,255,0.1);
+            color: white;
+            text-decoration: none;
+        }
+        
+        .sidebar-item i {
+            width: 25px;
+            margin-right: 10px;
+            text-align: center;
+        }
+        
+        .action-buttons .btn {
+            padding: 5px 10px;
+            border-radius: 8px;
+            margin: 2px;
+        }
+        
+        .pagination .page-link {
+            border-radius: 8px;
+            margin: 0 3px;
+            border: none;
+            color: var(--primary-color);
+        }
+        
+        .pagination .page-item.active .page-link {
+            background: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+        
+        .export-buttons .btn {
+            padding: 8px 15px;
+            border-radius: 10px;
+            margin: 0 5px;
+        }
+        
+        .candidat-photo {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 100%;
+                position: relative;
+                min-height: auto;
+            }
+            .main-content {
+                margin-left: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar d-none d-md-block">
+        <div class="sidebar-brand">
+            <h3><i class="fas fa-briefcase"></i> SCSM SARL</h3>
+            <p class="mb-0">Administration</p>
+        </div>
+        
+        <nav class="sidebar-nav">
+            <a href="{{ url_for('admin_dashboard') }}" class="sidebar-item">
+                <i class="fas fa-tachometer-alt"></i> Tableau de bord
+            </a>
+            <a href="{{ url_for('liste_candidatures') }}" class="sidebar-item active">
+                <i class="fas fa-users"></i> Candidatures
+            </a>
+            <a href="{{ url_for('statistiques') }}" class="sidebar-item">
+                <i class="fas fa-chart-bar"></i> Statistiques
+            </a>
+            <a href="{{ url_for('home') }}" class="sidebar-item">
+                <i class="fas fa-external-link-alt"></i> Site public
+            </a>
+            <div class="sidebar-item mt-4">
+                <i class="fas fa-user"></i> Connecté en tant que <strong>Admin</strong>
+            </div>
+            <a href="{{ url_for('admin_logout') }}" class="sidebar-item text-danger">
+                <i class="fas fa-sign-out-alt"></i> Déconnexion
+            </a>
+        </nav>
+    </div>
+    
+    <!-- Navigation mobile -->
+    <nav class="navbar navbar-expand-md d-md-none">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-briefcase"></i> Candidatures
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mobileNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="mobileNav">
+                <div class="navbar-nav">
+                    <a class="nav-link" href="{{ url_for('admin_dashboard') }}">
+                        <i class="fas fa-tachometer-alt"></i> Dashboard
+                    </a>
+                    <a class="nav-link active" href="{{ url_for('liste_candidatures') }}">
+                        <i class="fas fa-users"></i> Candidatures
+                    </a>
+                    <a class="nav-link" href="{{ url_for('statistiques') }}">
+                        <i class="fas fa-chart-bar"></i> Statistiques
+                    </a>
+                    <a class="nav-link" href="{{ url_for('home') }}">
+                        <i class="fas fa-external-link-alt"></i> Site public
+                    </a>
+                    <a class="nav-link text-danger" href="{{ url_for('admin_logout') }}">
+                        <i class="fas fa-sign-out-alt"></i> Déconnexion
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Contenu principal -->
+    <div class="main-content">
+        <!-- En-tête -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h1 class="h3 mb-2">
+                    <i class="fas fa-users"></i> Gestion des Candidatures
+                </h1>
+                <p class="text-muted">
+                    {{ candidatures.total }} candidature(s) trouvée(s)
+                    {% if current_statut and current_statut != 'all' %}
+                    - Filtre: {{ current_statut }}
+                    {% endif %}
+                </p>
+            </div>
+            <div class="text-end">
+                <span class="badge bg-primary">
+                    <i class="fas fa-calendar"></i> 
+                    {{ date_limite.strftime('%d/%m/%Y') }}
+                </span>
+                <span class="badge bg-success ms-2">
+                    <i class="fas fa-database"></i> 
+                    {{ candidatures.total }} total
+                </span>
+            </div>
+        </div>
+        
+        <!-- Messages flash -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }} alert-dismissible fade show">
+                        <i class="fas fa-{{ 'exclamation-triangle' if category == 'error' else 'check-circle' }}"></i>
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <!-- Filtres -->
+        <div class="filter-card">
+            <form method="GET" action="{{ url_for('liste_candidatures') }}" class="row g-3">
+                <div class="col-md-4">
+                    <label for="statut" class="form-label">Statut</label>
+                    <select class="form-select" id="statut" name="statut">
+                        <option value="all" {% if not current_statut or current_statut == 'all' %}selected{% endif %}>Tous les statuts</option>
+                        <option value="Nouvelle" {% if current_statut == 'Nouvelle' %}selected{% endif %}>Nouvelle</option>
+                        <option value="En revue" {% if current_statut == 'En revue' %}selected{% endif %}>En revue</option>
+                        <option value="Contacté" {% if current_statut == 'Contacté' %}selected{% endif %}>Contacté</option>
+                        <option value="Rejeté" {% if current_statut == 'Rejeté' %}selected{% endif %}>Rejeté</option>
+                    </select>
+                </div>
+                <div class="col-md-5">
+                    <label for="search" class="form-label">Recherche</label>
+                    <input type="text" class="form-control" id="search" name="search" 
+                           placeholder="Nom, email ou ville..." value="{{ search or '' }}">
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
+                    <div class="d-grid gap-2 d-md-flex w-100">
+                        <button type="submit" class="btn btn-primary flex-fill">
+                            <i class="fas fa-search"></i> Filtrer
+                        </button>
+                        <a href="{{ url_for('liste_candidatures') }}" class="btn btn-outline-secondary">
+                            <i class="fas fa-redo"></i>
+                        </a>
+                    </div>
+                </div>
+            </form>
+        </div>
+        
+        <!-- Boutons d'export -->
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="export-buttons">
+                <button class="btn btn-outline-success" onclick="exportTableToCSV()">
+                    <i class="fas fa-file-csv"></i> Exporter CSV
+                </button>
+                <button class="btn btn-outline-danger" onclick="window.print()">
+                    <i class="fas fa-print"></i> Imprimer
+                </button>
+            </div>
+            
+            <div class="pagination-info">
+                <span class="text-muted">
+                    Page {{ candidatures.page }} sur {{ candidatures.pages }} 
+                    ({{ candidatures.total }} résultats)
+                </span>
+            </div>
+        </div>
+        
+        <!-- Tableau des candidatures -->
+        <div class="table-container">
+            <div class="table-responsive">
+                <table class="table table-hover" id="candidaturesTable">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Candidat</th>
+                            <th>Contact</th>
+                            <th>Documents</th>
+                            <th>Date</th>
+                            <th>Statut</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for candidature in candidatures.items %}
+                        <tr>
+                            <td>
+                                <strong>#{{ candidature.id }}</strong>
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <div class="candidat-photo">
+                                        {{ candidature.nom_complet[0]|upper }}
+                                    </div>
+                                    <div>
+                                        <strong>{{ candidature.nom_complet }}</strong>
+                                        <br>
+                                        <small class="text-muted">{{ candidature.ville or 'Ville non précisée' }}</small>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <div>
+                                    <i class="fas fa-envelope"></i> 
+                                    <a href="mailto:{{ candidature.email }}" class="text-decoration-none">
+                                        {{ candidature.email }}
+                                    </a>
+                                    <br>
+                                    {% if candidature.telephone %}
+                                    <i class="fas fa-phone"></i> 
+                                    <small>{{ candidature.telephone }}</small>
+                                    {% else %}
+                                    <small class="text-muted">Pas de téléphone</small>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="d-flex gap-2">
+                                    {% if candidature.cv_path %}
+                                    <span class="badge bg-success" title="CV présent">
+                                        <i class="fas fa-file-contract"></i> CV
+                                    </span>
+                                    {% else %}
+                                    <span class="badge bg-secondary" title="CV manquant">
+                                        <i class="fas fa-times"></i> CV
+                                    </span>
+                                    {% endif %}
+                                    
+                                    {% if candidature.lettre_motivation_path %}
+                                    <span class="badge bg-info" title="Lettre présente">
+                                        <i class="fas fa-envelope-open-text"></i> Lettre
+                                    </span>
+                                    {% else %}
+                                    <span class="badge bg-secondary" title="Lettre manquante">
+                                        <i class="fas fa-times"></i> Lettre
+                                    </span>
+                                    {% endif %}
+                                    
+                                    {% if candidature.portfolio_fichier_path or candidature.portfolio_lien %}
+                                    <span class="badge bg-warning" title="Portfolio présent">
+                                        <i class="fas fa-briefcase"></i> Portfolio
+                                    </span>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                <small>{{ candidature.date_soumission.strftime('%d/%m/%Y') }}</small>
+                                <br>
+                                <small class="text-muted">{{ candidature.date_soumission.strftime('%H:%M') }}</small>
+                                <br>
+                                <small class="text-muted">
+                                    {{ ((now - candidature.date_soumission).days) }} jours
+                                </small>
+                            </td>
+                            <td>
+                                <span class="status-badge status-{{ candidature.statut.lower().replace(' ', '-').replace('é', 'e') }}">
+                                    {{ candidature.statut }}
+                                </span>
+                                {% if candidature.notes_admin %}
+                                <br>
+                                <small class="text-muted" title="{{ candidature.notes_admin }}">
+                                    <i class="fas fa-sticky-note"></i> Note
+                                </small>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="action-buttons">
+                                    <a href="{{ url_for('voir_candidature', id=candidature.id) }}" 
+                                       class="btn btn-sm btn-outline-primary" title="Voir détails">
+                                        <i class="fas fa-eye"></i>
+                                    </a>
+                                    <a href="{{ url_for('download_all_documents', id=candidature.id) }}" 
+                                       class="btn btn-sm btn-outline-success" title="Télécharger tous les documents">
+                                        <i class="fas fa-download"></i>
+                                    </a>
+                                    <button class="btn btn-sm btn-outline-info" 
+                                            onclick="changeStatus({{ candidature.id }})"
+                                            title="Changer le statut">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="7" class="text-center text-muted py-5">
+                                <i class="fas fa-inbox fa-3x mb-3"></i>
+                                <h5>Aucune candidature trouvée</h5>
+                                <p class="mb-0">
+                                    {% if current_statut or search %}
+                                    Essayez de modifier vos filtres de recherche
+                                    {% else %}
+                                    Aucune candidature n'a été soumise pour le moment
+                                    {% endif %}
+                                </p>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- Pagination -->
+        {% if candidatures.pages > 1 %}
+        <nav aria-label="Navigation des pages" class="mt-4">
+            <ul class="pagination justify-content-center">
+                <!-- Page précédente -->
+                {% if candidatures.has_prev %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('liste_candidatures', page=candidatures.prev_num, statut=current_statut, search=search) }}">
+                        <i class="fas fa-chevron-left"></i>
+                    </a>
+                </li>
+                {% else %}
+                <li class="page-item disabled">
+                    <span class="page-link"><i class="fas fa-chevron-left"></i></span>
+                </li>
+                {% endif %}
+                
+                <!-- Pages -->
+                {% for page_num in candidatures.iter_pages(left_edge=2, right_edge=2, left_current=2, right_current=2) %}
+                    {% if page_num %}
+                        {% if page_num == candidatures.page %}
+                        <li class="page-item active">
+                            <span class="page-link">{{ page_num }}</span>
+                        </li>
+                        {% else %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('liste_candidatures', page=page_num, statut=current_statut, search=search) }}">
+                                {{ page_num }}
+                            </a>
+                        </li>
+                        {% endif %}
+                    {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link">...</span>
+                    </li>
+                    {% endif %}
+                {% endfor %}
+                
+                <!-- Page suivante -->
+                {% if candidatures.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('liste_candidatures', page=candidatures.next_num, statut=current_statut, search=search) }}">
+                        <i class="fas fa-chevron-right"></i>
+                    </a>
+                </li>
+                {% else %}
+                <li class="page-item disabled">
+                    <span class="page-link"><i class="fas fa-chevron-right"></i></span>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+        {% endif %}
+        
+        <!-- Statistiques rapides -->
+        <div class="row mt-4">
+            <div class="col-md-3">
+                <div class="card stat-card">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">
+                            <i class="fas fa-file-alt text-primary"></i> 
+                            {{ candidatures.total }}
+                        </h5>
+                        <p class="card-text">Total candidatures</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">
+                            <i class="fas fa-clock text-warning"></i> 
+                            {{ candidatures_per_page }}
+                        </h5>
+                        <p class="card-text">Par page</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">
+                            <i class="fas fa-calendar text-success"></i> 
+                            {{ date_limite.strftime('%d/%m') }}
+                        </h5>
+                        <p class="card-text">Date limite</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">
+                            <i class="fas fa-user text-info"></i> 
+                            Admin
+                        </h5>
+                        <p class="card-text">Connecté</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Pied de page -->
+        <footer class="mt-5 pt-4 border-top text-muted text-center">
+            <p class="mb-1">
+                &copy; 2024 SCSM SARL - Gestion des candidatures v2.0
+            </p>
+            <p class="mb-0">
+                <i class="fas fa-shield-alt"></i> Données confidentielles | 
+                <i class="fas fa-history"></i> Dernière mise à jour: <span id="lastUpdate">Maintenant</span>
+            </p>
+        </footer>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Mettre à jour la dernière mise à jour
+            const now = new Date();
+            const options = { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                second: '2-digit'
+            };
+            document.getElementById('lastUpdate').textContent = now.toLocaleTimeString('fr-FR', options);
+            
+            // Initialiser DataTable si disponible
+            if (typeof $.fn.DataTable !== 'undefined') {
+                $('#candidaturesTable').DataTable({
+                    language: {
+                        url: '//cdn.datatables.net/plug-ins/1.13.6/i18n/fr-FR.json'
+                    },
+                    pageLength: 25,
+                    order: [[0, 'desc']]
+                });
+            }
+            
+            // Exporter en CSV
+            window.exportTableToCSV = function() {
+                const rows = document.querySelectorAll('#candidaturesTable tr');
+                const csv = [];
+                
+                for (let i = 0; i < rows.length; i++) {
+                    const row = [], cols = rows[i].querySelectorAll('td, th');
+                    
+                    for (let j = 0; j < cols.length - 1; j++) { // Exclure la dernière colonne (actions)
+                        // Nettoyer le texte
+                        let data = cols[j].innerText.replace(/(\r\n|\n|\r)/gm, '')
+                                                    .replace(/(\s\s+)/gm, ' ')
+                                                    .replace(/"/g, '""');
+                        data = `"${data}"`;
+                        row.push(data);
+                    }
+                    
+                    csv.push(row.join(','));
+                }
+                
+                // Télécharger le fichier CSV
+                const csvString = csv.join('\n');
+                const blob = new Blob([csvString], { type: 'text/csv' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.setAttribute('hidden', '');
+                a.setAttribute('href', url);
+                a.setAttribute('download', `candidatures_scms_${new Date().toISOString().split('T')[0]}.csv`);
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                
+                alert('Export CSV terminé ! Le fichier a été téléchargé.');
+            };
+            
+            // Fonction pour changer le statut
+            window.changeStatus = function(candidatureId) {
+                const newStatus = prompt('Changer le statut (Nouvelle, En revue, Contacté, Rejeté):', 'En revue');
+                if (newStatus && ['Nouvelle', 'En revue', 'Contacté', 'Rejeté'].includes(newStatus)) {
+                    // Ici, vous devriez faire un appel AJAX pour mettre à jour le statut
+                    // Pour l'instant, on redirige vers la page de détail
+                    window.location.href = `/admin/candidature/${candidatureId}`;
+                }
+            };
+            
+            // Auto-refresh toutes les 2 minutes pour les nouvelles candidatures
+            setTimeout(() => {
+                window.location.reload();
+            }, 2 * 60 * 1000);
+            
+            // Mettre en évidence les nouvelles candidatures
+            const newCandidates = document.querySelectorAll('.status-nouvelle');
+            newCandidates.forEach(badge => {
+                const row = badge.closest('tr');
+                if (row) {
+                    row.style.animation = 'highlight 2s infinite';
+                    
+                    // Ajouter le style pour l'animation
+                    const style = document.createElement('style');
+                    style.textContent = `
+                        @keyframes highlight {
+                            0% { background-color: rgba(220, 53, 69, 0.05); }
+                            50% { background-color: rgba(220, 53, 69, 0.1); }
+                            100% { background-color: rgba(220, 53, 69, 0.05); }
+                        }
+                    `;
+                    document.head.appendChild(style);
+                }
+            });
+        });
+    </script>
+</body>
+</html>
