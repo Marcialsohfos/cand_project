@@ -40,7 +40,7 @@ class Config:
     
     # Application settings
     APPLICATION_NAME = "SCMS SARL - Candidatures"
-    DATE_LIMITE = datetime(2026, 01, 31).date()
+    DATE_LIMITE = datetime(2026, 1, 31).date()
     
     # Emails de contact
     EMAIL_CONTACT = os.environ.get('EMAIL_CONTACT', 'scsmaubma@gmail.com')
@@ -77,3 +77,4 @@ config = {
     'default': DevelopmentConfig
 
 }
+
