@@ -5,6 +5,7 @@ import base64
 from datetime import datetime
 from io import BytesIO
 from functools import wraps
+import threading
 from flask import Flask, render_template, request, jsonify, send_file, url_for, flash, redirect, session, abort
 from flask_sqlalchemy import SQLAlchemy
 from flask_mail import Mail, Message
@@ -24,7 +25,7 @@ db = SQLAlchemy()
 mail = Mail()
 migrate = Migrate()
 
-# Modèle Candidature avec stockage des fichiers en base64
+# Modèle Candidature avec stockage optimisé
 class Candidature(db.Model):
     __tablename__ = 'candidatures'
     
@@ -36,26 +37,29 @@ class Candidature(db.Model):
     ville = db.Column(db.String(100))
     portfolio_lien = db.Column(db.String(500))
     
-    # Documents stockés en base64
-    cv_data = db.Column(db.Text)  # Fichier CV encodé en base64
+    # Stockage optimisé : seuls les petits fichiers en base64
+    cv_data = db.Column(db.Text)  # Pour les petits CV
     cv_filename = db.Column(db.String(500))
-    cv_mimetype = db.Column(db.String(100))
+    cv_size = db.Column(db.Integer)  # Taille en bytes
     
-    lettre_motivation_data = db.Column(db.Text)  # Lettre encodée en base64
+    lettre_motivation_data = db.Column(db.Text)
     lettre_motivation_filename = db.Column(db.String(500))
-    lettre_motivation_mimetype = db.Column(db.String(100))
+    lettre_motivation_size = db.Column(db.Integer)
     
-    portfolio_fichier_data = db.Column(db.Text)  # Portfolio encodé en base64
+    portfolio_fichier_data = db.Column(db.Text)
     portfolio_fichier_filename = db.Column(db.String(500))
-    portfolio_fichier_mimetype = db.Column(db.String(100))
+    portfolio_fichier_size = db.Column(db.Integer)
     
     lettre_motivation_text = db.Column(db.Text)
     competences_marketing = db.Column(db.Text)
     
     # Métadonnées
     date_soumission = db.Column(db.DateTime, default=datetime.utcnow)
-    statut = db.Column(db.String(50), default='Nouvelle')  # Nouvelle, En revue, Contacté, Rejeté
+    statut = db.Column(db.String(50), default='Nouvelle')
     notes_admin = db.Column(db.Text)
+    
+    # Pour suivi des performances
+    temps_traitement = db.Column(db.Float)  # Temps en secondes
     
     def to_dict(self):
         return {
@@ -82,6 +86,84 @@ def admin_required(f):
     return decorated_function
 
 
+# Fonction pour envoyer les emails en arrière-plan
+def send_emails_async(app, candidature_id):
+    """Envoyer les emails en arrière-plan dans un thread séparé"""
+    with app.app_context():
+        try:
+            candidature = Candidature.query.get(candidature_id)
+            if not candidature:
+                logger.error(f"Candidature {candidature_id} non trouvée pour l'envoi d'email")
+                return
+            
+            # Email de confirmation au candidat
+            try:
+                msg = Message(
+                    subject="Confirmation de réception de votre candidature - SCSM SARL",
+                    recipients=[candidature.email],
+                    sender=app.config['MAIL_DEFAULT_SENDER']
+                )
+                
+                msg.body = f"""
+                Bonjour {candidature.nom_complet},
+                
+                Nous accusons réception de votre candidature pour le poste chez SCSM SARL.
+                
+                Détails de votre soumission:
+                - Date: {candidature.date_soumission.strftime('%d/%m/%Y %H:%M')}
+                - Référence: CAND{candidature.id:06d}
+                
+                Nous examinerons votre dossier avec attention et vous contacterons si votre profil retient notre attention.
+                
+                Date limite de candidature: {app.config['DATE_LIMITE'].strftime('%d/%m/%Y')}
+                
+                Pour toute question, contactez-nous à:
+                - Email: {app.config.get('EMAIL_CONTACT', 'contact@example.com')}
+                - Support: {app.config.get('EMAIL_SUPPORT', 'support@example.com')}
+                
+                Cordialement,
+                L'équipe de recrutement SCSM SARL
+                """
+                
+                mail.send(msg)
+                logger.info(f"Email de confirmation envoyé à {candidature.email}")
+                
+            except Exception as e:
+                logger.error(f"Erreur lors de l'envoi de l'email de confirmation: {str(e)}")
+            
+            # Notification admin
+            try:
+                admin_email = app.config.get('EMAIL_CONTACT')
+                if admin_email:
+                    msg = Message(
+                        subject=f"[SCSM] Nouvelle candidature: {candidature.nom_complet}",
+                        recipients=[admin_email],
+                        sender=app.config['MAIL_DEFAULT_SENDER']
+                    )
+                    
+                    msg.body = f"""
+                    Nouvelle candidature reçue:
+                    
+                    Candidat: {candidature.nom_complet}
+                    Email: {candidature.email}
+                    Téléphone: {candidature.telephone}
+                    Ville: {candidature.ville}
+                    Date: {candidature.date_soumission.strftime('%d/%m/%Y %H:%M')}
+                    ID: CAND{candidature.id:06d}
+                    
+                    Pour voir les détails, connectez-vous à l'interface admin.
+                    """
+                    
+                    mail.send(msg)
+                    logger.info(f"Notification admin envoyée pour candidature {candidature.id}")
+                    
+            except Exception as e:
+                logger.error(f"Erreur notification admin: {str(e)}")
+                
+        except Exception as e:
+            logger.error(f"Erreur dans send_emails_async: {str(e)}")
+
+
 def create_app():
     """Factory pour créer l'application Flask"""
     app = Flask(__name__)
@@ -98,10 +180,14 @@ def create_app():
     
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///scms_candidatures.db'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_recycle': 300,
+        'pool_pre_ping': True,
+    }
     
-    # Uploads - Utiliser un dossier temporaire sur Render
+    # Uploads - Limites de taille réduites pour optimisation
     app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
-    app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20MB
+    app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5MB max (optimisé)
     
     # Extensions autorisées
     app.config['ALLOWED_EXTENSIONS'] = {
@@ -113,7 +199,6 @@ def create_app():
     app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
     app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
     app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'true').lower() in ['true', 'on', '1']
-    app.config['MAIL_USE_SSL'] = os.environ.get('MAIL_USE_SSL', 'false').lower() in ['true', 'on', '1']
     app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
     app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
     app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@example.com')
@@ -121,7 +206,6 @@ def create_app():
     # Admin credentials
     app.config['ADMIN_USERNAME'] = os.environ.get('ADMIN_USERNAME', 'admin')
     app.config['ADMIN_PASSWORD'] = os.environ.get('ADMIN_PASSWORD', 'admin123')
-    app.config['ADMIN_PASSWORD_HASH'] = os.environ.get('ADMIN_PASSWORD_HASH')
     
     # Application settings
     app.config['APPLICATION_NAME'] = "SCMS SARL - Candidatures"
@@ -133,6 +217,9 @@ def create_app():
     
     # Session settings
     app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 heure
+    
+    # Optimisation : compression des fichiers
+    app.config['COMPRESS_FILES'] = True
     
     # Créer le dossier temporaire pour uploads
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -156,29 +243,46 @@ def create_app():
         extension = filename.rsplit('.', 1)[1].lower()
         return extension in app.config['ALLOWED_EXTENSIONS']
     
-    def save_file_to_db(file, nom_candidat, type_document):
-        """Sauvegarder un fichier uploadé en base64 dans la base de données"""
+    def process_file_upload(file, max_size=5*1024*1024):
+        """Traiter un fichier uploadé de manière optimisée"""
         if not file or not file.filename:
-            logger.warning(f"Aucun fichier fourni pour {type_document}")
-            return None, None, None
+            return None, None, None, 0
         
         try:
-            # Lire le fichier
+            # Lire le fichier en mémoire de manière optimisée
+            file.seek(0, 2)  # Aller à la fin
+            file_size = file.tell()  # Taille du fichier
+            file.seek(0)  # Retour au début
+            
+            if file_size > max_size:
+                logger.warning(f"Fichier trop volumineux: {file_size} > {max_size}")
+                return None, None, None, file_size
+            
+            # Lire le contenu
             file_data = file.read()
             
-            # Encoder en base64
-            encoded_data = base64.b64encode(file_data).decode('utf-8')
-            
+            # Pour les petits fichiers, encoder en base64
+            if file_size < 2*1024*1024:  # < 2MB
+                encoded_data = base64.b64encode(file_data).decode('utf-8')
+            else:
+                # Pour les fichiers plus gros, stocker temporairement
+                temp_filename = secure_filename(f"temp_{datetime.now().timestamp()}_{file.filename}")
+                temp_path = os.path.join(app.config['UPLOAD_FOLDER'], temp_filename)
+                
+                with open(temp_path, 'wb') as f:
+                    f.write(file_data)
+                encoded_data = temp_path  # Stocker le chemin
+        
             # Informations sur le fichier
             original_name = secure_filename(file.filename)
             mimetype = file.mimetype or 'application/octet-stream'
             
-            logger.info(f"Fichier sauvegardé en base64: {original_name} ({len(encoded_data)} chars)")
-            return encoded_data, original_name, mimetype
+            logger.info(f"Fichier traité: {original_name} ({file_size} bytes)")
+            return encoded_data, original_name, mimetype, file_size
             
         except Exception as e:
-            logger.error(f"Erreur lors de la sauvegarde du fichier {file.filename}: {str(e)}", exc_info=True)
-            return None, None, None
+            logger.error(f"Erreur traitement fichier {file.filename}: {str(e)}")
+            return None, None, None, 0
     
     # Routes d'authentification admin
     @app.route('/admin/login', methods=['GET', 'POST'])
@@ -190,15 +294,7 @@ def create_app():
             
             # Vérifier les identifiants
             if username == app.config['ADMIN_USERNAME']:
-                # Si ADMIN_PASSWORD_HASH est configuré, vérifier le hash
-                if app.config.get('ADMIN_PASSWORD_HASH'):
-                    if check_password_hash(app.config['ADMIN_PASSWORD_HASH'], password):
-                        session['admin_logged_in'] = True
-                        session.permanent = True
-                        flash('Connexion réussie!', 'success')
-                        return redirect(url_for('admin_dashboard'))
-                # Sinon, vérifier le mot de passe en clair (pour développement)
-                elif password == app.config.get('ADMIN_PASSWORD', ''):
+                if password == app.config.get('ADMIN_PASSWORD', ''):
                     session['admin_logged_in'] = True
                     session.permanent = True
                     flash('Connexion réussie!', 'success')
@@ -296,133 +392,39 @@ def create_app():
         candidature = Candidature.query.get_or_404(id)
         
         file_info = {
-            'cv': (candidature.cv_data, candidature.cv_filename, candidature.cv_mimetype),
-            'lettre_motivation': (candidature.lettre_motivation_data, candidature.lettre_motivation_filename, candidature.lettre_motivation_mimetype),
-            'portfolio': (candidature.portfolio_fichier_data, candidature.portfolio_fichier_filename, candidature.portfolio_fichier_mimetype)
+            'cv': (candidature.cv_data, candidature.cv_filename),
+            'lettre_motivation': (candidature.lettre_motivation_data, candidature.lettre_motivation_filename),
+            'portfolio': (candidature.portfolio_fichier_data, candidature.portfolio_fichier_filename)
         }
         
         if document in file_info:
-            file_data, filename, mimetype = file_info[document]
+            file_data, filename = file_info[document]
             if file_data:
                 try:
-                    # Décoder les données base64
+                    # Si c'est un chemin de fichier (fichiers volumineux)
+                    if isinstance(file_data, str) and file_data.startswith('/tmp/'):
+                        if os.path.exists(file_data):
+                            return send_file(
+                                file_data,
+                                as_attachment=True,
+                                download_name=filename or f"{document}_{candidature.id}"
+                            )
+                    
+                    # Sinon, c'est du base64
                     file_bytes = base64.b64decode(file_data)
-                    
-                    # Créer un BytesIO pour le fichier
                     file_stream = BytesIO(file_bytes)
-                    
-                    # Nom de téléchargement
-                    if not filename:
-                        filename = f"{document}_{candidature.nom_complet}_{id}"
                     
                     return send_file(
                         file_stream,
                         as_attachment=True,
-                        download_name=filename,
-                        mimetype=mimetype
+                        download_name=filename or f"{document}_{candidature.id}",
+                        mimetype='application/octet-stream'
                     )
                 except Exception as e:
-                    logger.error(f"Erreur lors du décodage du fichier: {str(e)}")
+                    logger.error(f"Erreur lors du téléchargement: {str(e)}")
         
         flash('Document non trouvé', 'error')
         return redirect(url_for('voir_candidature', id=id))
-    
-    @app.route('/admin/download-all/<int:id>')
-    @admin_required
-    def download_all_documents(id):
-        """Télécharger tous les documents d'une candidature en ZIP"""
-        candidature = Candidature.query.get_or_404(id)
-        
-        # Créer un fichier ZIP en mémoire
-        memory_file = BytesIO()
-        
-        with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
-            documents = [
-                ('cv', candidature.cv_data, candidature.cv_filename),
-                ('lettre_motivation', candidature.lettre_motivation_data, candidature.lettre_motivation_filename),
-                ('portfolio', candidature.portfolio_fichier_data, candidature.portfolio_fichier_filename)
-            ]
-            
-            for doc_type, data, filename in documents:
-                if data:
-                    try:
-                        # Décoder les données base64
-                        file_bytes = base64.b64decode(data)
-                        
-                        # Utiliser le nom original ou créer un nom par défaut
-                        if filename:
-                            file_in_zip = f"{candidature.nom_complet}_{doc_type}_{filename}"
-                        else:
-                            file_in_zip = f"{candidature.nom_complet}_{doc_type}"
-                        
-                        zf.writestr(file_in_zip, file_bytes)
-                    except Exception as e:
-                        logger.error(f"Erreur lors de l'ajout de {doc_type} au ZIP: {str(e)}")
-            
-            # Ajouter un fichier texte avec les informations
-            info_content = f"""
-            Candidature: {candidature.nom_complet}
-            Email: {candidature.email}
-            Téléphone: {candidature.telephone}
-            Ville: {candidature.ville}
-            Date de soumission: {candidature.date_soumission}
-            Statut: {candidature.statut}
-            
-            Lettre de motivation:
-            {candidature.lettre_motivation_text}
-            
-            Compétences:
-            {candidature.competences_marketing}
-            
-            Portfolio (lien): {candidature.portfolio_lien}
-            """
-            
-            zf.writestr(f"{candidature.nom_complet}_informations.txt", info_content)
-        
-        memory_file.seek(0)
-        
-        return send_file(
-            memory_file,
-            download_name=f"Candidature_{candidature.nom_complet}_{id}.zip",
-            as_attachment=True,
-            mimetype='application/zip'
-        )
-    
-    @app.route('/admin/api/candidatures')
-    @admin_required
-    def api_candidatures():
-        """API pour récupérer les candidatures (pour dashboard)"""
-        candidatures = Candidature.query.order_by(Candidature.date_soumission.desc()).all()
-        return jsonify([c.to_dict() for c in candidatures])
-    
-    @app.route('/admin/statistiques')
-    @admin_required
-    def statistiques():
-        """Page de statistiques"""
-        # Statistiques par statut
-        stats_statut = db.session.query(
-            Candidature.statut, 
-            db.func.count(Candidature.id)
-        ).group_by(Candidature.statut).all()
-        
-        # Statistiques par mois
-        stats_mois = db.session.query(
-            db.func.strftime('%Y-%m', Candidature.date_soumission),
-            db.func.count(Candidature.id)
-        ).filter(Candidature.date_soumission.isnot(None)).group_by(db.func.strftime('%Y-%m', Candidature.date_soumission)).all()
-        
-        # Top villes
-        top_villes = db.session.query(
-            Candidature.ville,
-            db.func.count(Candidature.id)
-        ).filter(Candidature.ville.isnot(None)).group_by(Candidature.ville).order_by(
-            db.func.count(Candidature.id).desc()
-        ).limit(10).all()
-        
-        return render_template('admin/statistiques.html',
-                             stats_statut=stats_statut,
-                             stats_mois=stats_mois,
-                             top_villes=top_villes)
     
     # Route pour la page d'accueil
     @app.route('/home')
@@ -463,10 +465,13 @@ def create_app():
                              email_contact=app.config.get('EMAIL_CONTACT', 'contact@example.com'),
                              email_support=app.config.get('EMAIL_SUPPORT', 'support@example.com'))
     
-    # Routes publiques (candidats)
+    # Routes publiques (candidats) - OPTIMISÉE
     @app.route('/postuler', methods=['POST'])
     def postuler():
-        """Soumettre une candidature"""
+        """Soumettre une candidature - Version optimisée"""
+        import time
+        start_time = time.time()
+        
         # Vérifier la date limite
         aujourdhui = datetime.now().date()
         if aujourdhui > app.config['DATE_LIMITE']:
@@ -476,9 +481,8 @@ def create_app():
             }), 400
         
         try:
-            # Log pour déboguer
-            logger.info(f"Form data received")
-            logger.info(f"Files received: {list(request.files.keys())}")
+            # Mesurer le temps
+            processing_times = {}
             
             # Récupérer les données du formulaire
             candidature = Candidature()
@@ -492,105 +496,87 @@ def create_app():
             candidature.lettre_motivation_text = request.form.get('motivation', '').strip()
             candidature.competences_marketing = request.form.get('competences', '').strip()
             
-            logger.info(f"Nom: {candidature.nom_complet}, Email: {candidature.email}")
+            # Validation rapide
+            if not candidature.nom_complet or not candidature.email:
+                return jsonify({'success': False, 'error': 'Nom complet et email sont obligatoires'}), 400
             
-            # Validation
-            if not candidature.nom_complet:
-                return jsonify({'success': False, 'error': 'Le nom complet est obligatoire'}), 400
-            
-            if not candidature.email:
-                return jsonify({'success': False, 'error': 'L\'email est obligatoire'}), 400
-            
-            # Traiter les fichiers avec plus de logging
             file_status = {}
             
-            # CV - Fichier obligatoire
-            if 'cv' in request.files:
-                file = request.files['cv']
-                if file and file.filename:
-                    logger.info(f"CV file received: {file.filename}, size: {file.content_length}")
-                    if allowed_file(file.filename):
-                        cv_data, cv_filename, cv_mimetype = save_file_to_db(file, candidature.nom_complet, 'cv')
-                        if cv_data:
-                            candidature.cv_data = cv_data
-                            candidature.cv_filename = cv_filename
-                            candidature.cv_mimetype = cv_mimetype
-                            file_status['cv'] = f"CV uploadé: {file.filename}"
-                        else:
-                            file_status['cv'] = "Erreur lors de l'upload du CV"
-                            return jsonify({'success': False, 'error': 'Erreur lors de l\'upload du CV'}), 400
-                    else:
-                        file_status['cv'] = f"Extension non autorisée pour le CV: {file.filename}"
-                        return jsonify({'success': False, 'error': f'Extension non autorisée pour le CV: {file.filename}'}), 400
-            else:
+            # Traiter le CV (obligatoire)
+            if 'cv' not in request.files:
                 return jsonify({'success': False, 'error': 'Le CV est obligatoire'}), 400
             
-            # Lettre de motivation - Fichier obligatoire
-            if 'lettre_motivation' in request.files:
-                file = request.files['lettre_motivation']
-                if file and file.filename:
-                    logger.info(f"Lettre file received: {file.filename}")
-                    if allowed_file(file.filename):
-                        lettre_data, lettre_filename, lettre_mimetype = save_file_to_db(file, candidature.nom_complet, 'lettre_motivation')
-                        if lettre_data:
-                            candidature.lettre_motivation_data = lettre_data
-                            candidature.lettre_motivation_filename = lettre_filename
-                            candidature.lettre_motivation_mimetype = lettre_mimetype
-                            file_status['lettre'] = f"Lettre uploadée: {file.filename}"
-                        else:
-                            file_status['lettre'] = "Erreur lors de l'upload de la lettre de motivation"
+            cv_file = request.files['cv']
+            if cv_file and cv_file.filename:
+                if allowed_file(cv_file.filename):
+                    cv_data, cv_filename, cv_mimetype, cv_size = process_file_upload(cv_file)
+                    if cv_data:
+                        candidature.cv_data = cv_data
+                        candidature.cv_filename = cv_filename
+                        candidature.cv_size = cv_size
+                        file_status['cv'] = f"CV uploadé ({cv_size//1024} KB)"
                     else:
-                        file_status['lettre'] = f"Extension non autorisée pour la lettre: {file.filename}"
+                        return jsonify({'success': False, 'error': 'Erreur traitement CV'}), 400
                 else:
-                    return jsonify({'success': False, 'error': 'La lettre de motivation est obligatoire'}), 400
+                    return jsonify({'success': False, 'error': 'Extension CV non autorisée'}), 400
             
-            # Portfolio fichier - Optionnel
+            # Traiter la lettre de motivation (obligatoire)
+            if 'lettre_motivation' not in request.files:
+                return jsonify({'success': False, 'error': 'La lettre de motivation est obligatoire'}), 400
+            
+            lettre_file = request.files['lettre_motivation']
+            if lettre_file and lettre_file.filename:
+                if allowed_file(lettre_file.filename):
+                    lettre_data, lettre_filename, lettre_mimetype, lettre_size = process_file_upload(lettre_file)
+                    if lettre_data:
+                        candidature.lettre_motivation_data = lettre_data
+                        candidature.lettre_motivation_filename = lettre_filename
+                        candidature.lettre_motivation_size = lettre_size
+                        file_status['lettre'] = f"Lettre uploadée ({lettre_size//1024} KB)"
+                    else:
+                        return jsonify({'success': False, 'error': 'Erreur traitement lettre'}), 400
+            
+            # Portfolio (optionnel)
             if 'portfolio_fichier' in request.files:
-                file = request.files['portfolio_fichier']
-                if file and file.filename:
-                    logger.info(f"Portfolio file received: {file.filename}")
-                    if allowed_file(file.filename):
-                        portfolio_data, portfolio_filename, portfolio_mimetype = save_file_to_db(file, candidature.nom_complet, 'portfolio')
+                portfolio_file = request.files['portfolio_fichier']
+                if portfolio_file and portfolio_file.filename:
+                    if allowed_file(portfolio_file.filename):
+                        portfolio_data, portfolio_filename, portfolio_mimetype, portfolio_size = process_file_upload(portfolio_file)
                         if portfolio_data:
                             candidature.portfolio_fichier_data = portfolio_data
                             candidature.portfolio_fichier_filename = portfolio_filename
-                            candidature.portfolio_fichier_mimetype = portfolio_mimetype
-                            file_status['portfolio'] = f"Portfolio uploadé: {file.filename}"
-                    else:
-                        file_status['portfolio'] = f"Extension non autorisée pour le portfolio: {file.filename}"
-            
-            logger.info(f"File upload status: {file_status}")
+                            candidature.portfolio_fichier_size = portfolio_size
+                            file_status['portfolio'] = f"Portfolio uploadé ({portfolio_size//1024} KB)"
             
             # Sauvegarder en base de données
             db.session.add(candidature)
             db.session.commit()
             
-            logger.info(f"Candidature {candidature.id} sauvegardée avec succès")
+            processing_time = time.time() - start_time
+            candidature.temps_traitement = processing_time
+            db.session.commit()
             
-            # Préparer le message de succès avec détails des fichiers
-            message = 'Candidature soumise avec succès !'
-            if file_status:
-                message += "\nFichiers uploadés:\n"
-                for doc, status in file_status.items():
-                    message += f"- {status}\n"
+            logger.info(f"Candidature {candidature.id} sauvegardée en {processing_time:.2f}s")
             
-            # Envoyer l'email de confirmation
+            # Lancer l'envoi des emails en arrière-plan (NE BLOQUE PAS LA RÉPONSE)
             try:
-                send_confirmation_email(candidature, app)
+                email_thread = threading.Thread(
+                    target=send_emails_async,
+                    args=(app, candidature.id)
+                )
+                email_thread.daemon = True  # Thread démon (se termine avec l'app)
+                email_thread.start()
+                logger.info(f"Thread email lancé pour candidature {candidature.id}")
             except Exception as e:
-                logger.error(f"Erreur lors de l'envoi de l'email de confirmation: {str(e)}")
+                logger.error(f"Erreur lancement thread email: {str(e)}")
             
-            # Envoyer la notification à l'admin
-            try:
-                send_admin_notification(candidature, app)
-            except Exception as e:
-                logger.error(f"Erreur notification admin: {str(e)}")
-            
+            # Réponse immédiate au candidat (sans attendre les emails)
             return jsonify({
                 'success': True,
-                'message': message,
+                'message': 'Candidature soumise avec succès ! Vous recevrez un email de confirmation.',
                 'id': candidature.id,
                 'nom': candidature.nom_complet,
+                'temps_traitement': f"{processing_time:.2f}s",
                 'file_status': file_status
             })
             
@@ -625,77 +611,6 @@ def create_app():
         return render_template('errors/500.html'), 500
     
     return app
-
-
-def send_confirmation_email(candidature, app):
-    """Envoyer un email de confirmation au candidat"""
-    try:
-        msg = Message(
-            subject="Confirmation de réception de votre candidature - SCSM SARL",
-            recipients=[candidature.email],
-            sender=app.config['MAIL_DEFAULT_SENDER']
-        )
-        
-        msg.body = f"""
-        Bonjour {candidature.nom_complet},
-        
-        Nous accusons réception de votre candidature pour le poste chez SCSM SARL.
-        
-        Détails de votre soumission:
-        - Date: {candidature.date_soumission.strftime('%d/%m/%Y %H:%M')}
-        - Référence: CAND{candidature.id:06d}
-        
-        Nous examinerons votre dossier avec attention et vous contacterons si votre profil retient notre attention.
-        
-        Date limite de candidature: {app.config['DATE_LIMITE'].strftime('%d/%m/%Y')}
-        
-        Pour toute question, contactez-nous à:
-        - Email: {app.config.get('EMAIL_CONTACT', 'contact@example.com')}
-        - Support: {app.config.get('EMAIL_SUPPORT', 'support@example.com')}
-        
-        Cordialement,
-        L'équipe de recrutement SCSM SARL
-        """
-        
-        mail.send(msg)
-        logger.info(f"Email de confirmation envoyé à {candidature.email}")
-        
-    except Exception as e:
-        logger.error(f"Erreur lors de l'envoi de l'email de confirmation: {str(e)}")
-
-
-def send_admin_notification(candidature, app):
-    """Notifier l'admin de la nouvelle candidature"""
-    try:
-        admin_email = app.config.get('EMAIL_CONTACT')
-        if not admin_email:
-            logger.warning("EMAIL_CONTACT non configuré, notification admin ignorée")
-            return
-        
-        msg = Message(
-            subject=f"[SCSM] Nouvelle candidature: {candidature.nom_complet}",
-            recipients=[admin_email],
-            sender=app.config['MAIL_DEFAULT_SENDER']
-        )
-        
-        msg.body = f"""
-        Nouvelle candidature reçue:
-        
-        Candidat: {candidature.nom_complet}
-        Email: {candidature.email}
-        Téléphone: {candidature.telephone}
-        Ville: {candidature.ville}
-        Date: {candidature.date_soumission.strftime('%d/%m/%Y %H:%M')}
-        ID: CAND{candidature.id:06d}
-        
-        Pour voir les détails, connectez-vous à l'interface admin.
-        """
-        
-        mail.send(msg)
-        logger.info(f"Notification admin envoyée pour candidature {candidature.id}")
-        
-    except Exception as e:
-        logger.error(f"Erreur notification admin: {str(e)}")
 
 
 if __name__ == '__main__':
