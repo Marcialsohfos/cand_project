@@ -1,6 +1,7 @@
 import os
 import json
 import zipfile
+import base64
 from datetime import datetime
 from io import BytesIO
 from functools import wraps
@@ -11,7 +12,6 @@ from flask_cors import CORS
 from flask_migrate import Migrate
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
-from config import config
 import logging
 from pathlib import Path
 
@@ -24,7 +24,7 @@ db = SQLAlchemy()
 mail = Mail()
 migrate = Migrate()
 
-# Modèle Candidature
+# Modèle Candidature avec stockage des fichiers en base64
 class Candidature(db.Model):
     __tablename__ = 'candidatures'
     
@@ -36,13 +36,20 @@ class Candidature(db.Model):
     ville = db.Column(db.String(100))
     portfolio_lien = db.Column(db.String(500))
     
-    # Documents (chemins de fichiers)
-    cv_path = db.Column(db.String(500))
-    lettre_motivation_path = db.Column(db.String(500))
-    lettre_motivation_text = db.Column(db.Text)
-    portfolio_fichier_path = db.Column(db.String(500))
+    # Documents stockés en base64
+    cv_data = db.Column(db.Text)  # Fichier CV encodé en base64
+    cv_filename = db.Column(db.String(500))
+    cv_mimetype = db.Column(db.String(100))
     
-    # Informations supplémentaires
+    lettre_motivation_data = db.Column(db.Text)  # Lettre encodée en base64
+    lettre_motivation_filename = db.Column(db.String(500))
+    lettre_motivation_mimetype = db.Column(db.String(100))
+    
+    portfolio_fichier_data = db.Column(db.Text)  # Portfolio encodé en base64
+    portfolio_fichier_filename = db.Column(db.String(500))
+    portfolio_fichier_mimetype = db.Column(db.String(100))
+    
+    lettre_motivation_text = db.Column(db.Text)
     competences_marketing = db.Column(db.Text)
     
     # Métadonnées
@@ -59,9 +66,9 @@ class Candidature(db.Model):
             'ville': self.ville,
             'date_soumission': self.date_soumission.isoformat() if self.date_soumission else None,
             'statut': self.statut,
-            'has_cv': bool(self.cv_path),
-            'has_lettre': bool(self.lettre_motivation_path),
-            'has_portfolio': bool(self.portfolio_fichier_path)
+            'has_cv': bool(self.cv_data),
+            'has_lettre': bool(self.lettre_motivation_data),
+            'has_portfolio': bool(self.portfolio_fichier_data)
         }
 
 
@@ -75,13 +82,60 @@ def admin_required(f):
     return decorated_function
 
 
-def create_app(config_name='default'):
+def create_app():
     """Factory pour créer l'application Flask"""
     app = Flask(__name__)
     
-    # Charger la configuration
-    app.config.from_object(config[config_name])
-    config[config_name].init_app(app)
+    # Configuration pour Render
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-scms-2024-change-in-production')
+    
+    # Base de données PostgreSQL pour Render
+    database_url = os.environ.get('DATABASE_URL')
+    
+    # Correction pour PostgreSQL sur Render
+    if database_url and database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///scms_candidatures.db'
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    
+    # Uploads - Utiliser un dossier temporaire sur Render
+    app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
+    app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20MB
+    
+    # Extensions autorisées
+    app.config['ALLOWED_EXTENSIONS'] = {
+        'pdf', 'doc', 'docx', 'txt',
+        'jpg', 'jpeg', 'png', 'gif'
+    }
+    
+    # Email configuration
+    app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
+    app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
+    app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'true').lower() in ['true', 'on', '1']
+    app.config['MAIL_USE_SSL'] = os.environ.get('MAIL_USE_SSL', 'false').lower() in ['true', 'on', '1']
+    app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
+    app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
+    app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@example.com')
+    
+    # Admin credentials
+    app.config['ADMIN_USERNAME'] = os.environ.get('ADMIN_USERNAME', 'admin')
+    app.config['ADMIN_PASSWORD'] = os.environ.get('ADMIN_PASSWORD', 'admin123')
+    app.config['ADMIN_PASSWORD_HASH'] = os.environ.get('ADMIN_PASSWORD_HASH')
+    
+    # Application settings
+    app.config['APPLICATION_NAME'] = "SCMS SARL - Candidatures"
+    app.config['DATE_LIMITE'] = datetime(2026, 2, 24).date()
+    
+    # Emails de contact
+    app.config['EMAIL_CONTACT'] = os.environ.get('EMAIL_CONTACT', 'scsmaubma@gmail.com')
+    app.config['EMAIL_SUPPORT'] = os.environ.get('EMAIL_SUPPORT', 'support@scsmaubmar.org')
+    
+    # Session settings
+    app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 heure
+    
+    # Créer le dossier temporaire pour uploads
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     
     # Initialiser les extensions
     db.init_app(app)
@@ -93,7 +147,7 @@ def create_app(config_name='default'):
     with app.app_context():
         db.create_all()
     
-    # Helper functions - CORRIGÉ
+    # Helper functions
     def allowed_file(filename):
         """Vérifier si l'extension du fichier est autorisée"""
         if not filename or '.' not in filename:
@@ -102,87 +156,29 @@ def create_app(config_name='default'):
         extension = filename.rsplit('.', 1)[1].lower()
         return extension in app.config['ALLOWED_EXTENSIONS']
     
-    def save_file(file, nom_candidat, type_document):
-        """Sauvegarder un fichier uploadé"""
+    def save_file_to_db(file, nom_candidat, type_document):
+        """Sauvegarder un fichier uploadé en base64 dans la base de données"""
         if not file or not file.filename:
             logger.warning(f"Aucun fichier fourni pour {type_document}")
-            return None
-        
-        # Sécuriser le nom du fichier
-        original_name = secure_filename(file.filename)
-        
-        if not allowed_file(original_name):
-            logger.error(f"Extension non autorisée: {original_name}")
-            return None
+            return None, None, None
         
         try:
-            # Créer un nom de fichier unique
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-            nom_simplifie = ''.join(c for c in nom_candidat if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
-            if not nom_simplifie:
-                nom_simplifie = 'candidat'
+            # Lire le fichier
+            file_data = file.read()
             
-            # Conserver l'extension originale
-            extension = original_name.rsplit('.', 1)[-1].lower()
-            new_filename = f"{timestamp}_{nom_simplifie}_{type_document}.{extension}"
+            # Encoder en base64
+            encoded_data = base64.b64encode(file_data).decode('utf-8')
             
-            # Créer le dossier si inexistant
-            upload_folder = app.config['UPLOAD_FOLDER']
-            os.makedirs(upload_folder, exist_ok=True)
+            # Informations sur le fichier
+            original_name = secure_filename(file.filename)
+            mimetype = file.mimetype or 'application/octet-stream'
             
-            # Chemin complet
-            filepath = os.path.join(upload_folder, new_filename)
-            
-            # Sauvegarder
-            file.save(filepath)
-            
-            # Vérifier que le fichier a été correctement sauvegardé
-            if os.path.exists(filepath):
-                file_size = os.path.getsize(filepath)
-                logger.info(f"Fichier sauvegardé avec succès: {new_filename} ({file_size} bytes)")
-                return new_filename
-            else:
-                logger.error(f"Échec de sauvegarde: {filepath} n'existe pas")
-                return None
-                
-        except Exception as e:
-            logger.error(f"Erreur lors de la sauvegarde du fichier {original_name}: {str(e)}", exc_info=True)
-            return None
-    
-    # Route pour afficher les fichiers uploadés - NOUVELLE ROUTE
-    @app.route('/uploads/<filename>')
-    def uploaded_file(filename):
-        """Afficher un fichier uploadé"""
-        try:
-            # Sécuriser le nom du fichier
-            filename = secure_filename(filename)
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            
-            if not os.path.exists(filepath):
-                abort(404)
-            
-            # Déterminer le type MIME
-            mime_type = 'application/octet-stream'
-            if filename.endswith('.pdf'):
-                mime_type = 'application/pdf'
-            elif filename.endswith('.doc'):
-                mime_type = 'application/msword'
-            elif filename.endswith('.docx'):
-                mime_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-            elif filename.endswith('.txt'):
-                mime_type = 'text/plain'
-            elif filename.endswith('.jpg') or filename.endswith('.jpeg'):
-                mime_type = 'image/jpeg'
-            elif filename.endswith('.png'):
-                mime_type = 'image/png'
-            elif filename.endswith('.gif'):
-                mime_type = 'image/gif'
-            
-            return send_file(filepath, mimetype=mime_type)
+            logger.info(f"Fichier sauvegardé en base64: {original_name} ({len(encoded_data)} chars)")
+            return encoded_data, original_name, mimetype
             
         except Exception as e:
-            logger.error(f"Erreur lors de l'affichage du fichier {filename}: {str(e)}")
-            abort(404)
+            logger.error(f"Erreur lors de la sauvegarde du fichier {file.filename}: {str(e)}", exc_info=True)
+            return None, None, None
     
     # Routes d'authentification admin
     @app.route('/admin/login', methods=['GET', 'POST'])
@@ -300,23 +296,33 @@ def create_app(config_name='default'):
         candidature = Candidature.query.get_or_404(id)
         
         file_info = {
-            'cv': (candidature.cv_path, f"CV_{candidature.nom_complet}_{id}"),
-            'lettre_motivation': (candidature.lettre_motivation_path, f"Lettre_{candidature.nom_complet}_{id}"),
-            'portfolio': (candidature.portfolio_fichier_path, f"Portfolio_{candidature.nom_complet}_{id}")
+            'cv': (candidature.cv_data, candidature.cv_filename, candidature.cv_mimetype),
+            'lettre_motivation': (candidature.lettre_motivation_data, candidature.lettre_motivation_filename, candidature.lettre_motivation_mimetype),
+            'portfolio': (candidature.portfolio_fichier_data, candidature.portfolio_fichier_filename, candidature.portfolio_fichier_mimetype)
         }
         
         if document in file_info:
-            file_path, base_name = file_info[document]
-            if file_path:
-                full_path = os.path.join(app.config['UPLOAD_FOLDER'], file_path)
-                if os.path.exists(full_path):
-                    extension = file_path.split('.')[-1] if '.' in file_path else ''
-                    download_name = f"{base_name}.{extension}" if extension else base_name
+            file_data, filename, mimetype = file_info[document]
+            if file_data:
+                try:
+                    # Décoder les données base64
+                    file_bytes = base64.b64decode(file_data)
+                    
+                    # Créer un BytesIO pour le fichier
+                    file_stream = BytesIO(file_bytes)
+                    
+                    # Nom de téléchargement
+                    if not filename:
+                        filename = f"{document}_{candidature.nom_complet}_{id}"
+                    
                     return send_file(
-                        full_path,
+                        file_stream,
                         as_attachment=True,
-                        download_name=download_name
+                        download_name=filename,
+                        mimetype=mimetype
                     )
+                except Exception as e:
+                    logger.error(f"Erreur lors du décodage du fichier: {str(e)}")
         
         flash('Document non trouvé', 'error')
         return redirect(url_for('voir_candidature', id=id))
@@ -332,18 +338,26 @@ def create_app(config_name='default'):
         
         with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
             documents = [
-                ('cv', candidature.cv_path),
-                ('lettre_motivation', candidature.lettre_motivation_path),
-                ('portfolio', candidature.portfolio_fichier_path)
+                ('cv', candidature.cv_data, candidature.cv_filename),
+                ('lettre_motivation', candidature.lettre_motivation_data, candidature.lettre_motivation_filename),
+                ('portfolio', candidature.portfolio_fichier_data, candidature.portfolio_fichier_filename)
             ]
             
-            for doc_type, path in documents:
-                if path:
-                    file_path = os.path.join(app.config['UPLOAD_FOLDER'], path)
-                    if os.path.exists(file_path):
-                        extension = path.split('.')[-1] if '.' in path else ''
-                        filename_in_zip = f"{candidature.nom_complet}_{doc_type}.{extension}" if extension else f"{candidature.nom_complet}_{doc_type}"
-                        zf.write(file_path, filename_in_zip)
+            for doc_type, data, filename in documents:
+                if data:
+                    try:
+                        # Décoder les données base64
+                        file_bytes = base64.b64decode(data)
+                        
+                        # Utiliser le nom original ou créer un nom par défaut
+                        if filename:
+                            file_in_zip = f"{candidature.nom_complet}_{doc_type}_{filename}"
+                        else:
+                            file_in_zip = f"{candidature.nom_complet}_{doc_type}"
+                        
+                        zf.writestr(file_in_zip, file_bytes)
+                    except Exception as e:
+                        logger.error(f"Erreur lors de l'ajout de {doc_type} au ZIP: {str(e)}")
             
             # Ajouter un fichier texte avec les informations
             info_content = f"""
@@ -496,9 +510,11 @@ def create_app(config_name='default'):
                 if file and file.filename:
                     logger.info(f"CV file received: {file.filename}, size: {file.content_length}")
                     if allowed_file(file.filename):
-                        filename = save_file(file, candidature.nom_complet, 'cv')
-                        if filename:
-                            candidature.cv_path = filename
+                        cv_data, cv_filename, cv_mimetype = save_file_to_db(file, candidature.nom_complet, 'cv')
+                        if cv_data:
+                            candidature.cv_data = cv_data
+                            candidature.cv_filename = cv_filename
+                            candidature.cv_mimetype = cv_mimetype
                             file_status['cv'] = f"CV uploadé: {file.filename}"
                         else:
                             file_status['cv'] = "Erreur lors de l'upload du CV"
@@ -515,9 +531,11 @@ def create_app(config_name='default'):
                 if file and file.filename:
                     logger.info(f"Lettre file received: {file.filename}")
                     if allowed_file(file.filename):
-                        filename = save_file(file, candidature.nom_complet, 'lettre_motivation')
-                        if filename:
-                            candidature.lettre_motivation_path = filename
+                        lettre_data, lettre_filename, lettre_mimetype = save_file_to_db(file, candidature.nom_complet, 'lettre_motivation')
+                        if lettre_data:
+                            candidature.lettre_motivation_data = lettre_data
+                            candidature.lettre_motivation_filename = lettre_filename
+                            candidature.lettre_motivation_mimetype = lettre_mimetype
                             file_status['lettre'] = f"Lettre uploadée: {file.filename}"
                         else:
                             file_status['lettre'] = "Erreur lors de l'upload de la lettre de motivation"
@@ -532,9 +550,11 @@ def create_app(config_name='default'):
                 if file and file.filename:
                     logger.info(f"Portfolio file received: {file.filename}")
                     if allowed_file(file.filename):
-                        filename = save_file(file, candidature.nom_complet, 'portfolio')
-                        if filename:
-                            candidature.portfolio_fichier_path = filename
+                        portfolio_data, portfolio_filename, portfolio_mimetype = save_file_to_db(file, candidature.nom_complet, 'portfolio')
+                        if portfolio_data:
+                            candidature.portfolio_fichier_data = portfolio_data
+                            candidature.portfolio_fichier_filename = portfolio_filename
+                            candidature.portfolio_fichier_mimetype = portfolio_mimetype
                             file_status['portfolio'] = f"Portfolio uploadé: {file.filename}"
                     else:
                         file_status['portfolio'] = f"Extension non autorisée pour le portfolio: {file.filename}"
@@ -603,30 +623,6 @@ def create_app(config_name='default'):
     def internal_server_error(e):
         logger.error(f"Erreur 500: {str(e)}")
         return render_template('errors/500.html'), 500
-    
-    # Test route pour l'upload
-    @app.route('/test-upload', methods=['GET', 'POST'])
-    def test_upload():
-        """Route de test pour l'upload"""
-        if request.method == 'POST':
-            file = request.files.get('test_file')
-            if file:
-                filename = secure_filename(file.filename)
-                # Créer le dossier uploads s'il n'existe pas
-                os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-                filepath = os.path.join(app.config['UPLOAD_FOLDER'], f'test_{filename}')
-                file.save(filepath)
-                size = os.path.getsize(filepath)
-                return f'Fichier {filename} reçu ({size} bytes) - Sauvegardé à: {filepath}'
-        
-        return '''
-        <h1>Test d'Upload</h1>
-        <form method="POST" enctype="multipart/form-data">
-            <input type="file" name="test_file">
-            <button type="submit">Tester l'Upload</button>
-        </form>
-        <p>Extensions autorisées: ''' + ', '.join(app.config['ALLOWED_EXTENSIONS']) + '''</p>
-        '''
     
     return app
 
@@ -704,6 +700,5 @@ def send_admin_notification(candidature, app):
 
 if __name__ == '__main__':
     app = create_app()
-    app.logger.setLevel(logging.DEBUG)  # Pour plus de logs
     port = int(os.environ.get('PORT', 5000))
-    app.run(debug=True, host='0.0.0.0', port=port)
+    app.run(debug=False, host='0.0.0.0', port=port)
